@@ -1,0 +1,12 @@
+.venv/
+venv/
+ENV/
+env/
+*.png
+*.jpg
+*.jpeg
+*.svg
+*.cache
+.idea/
+__pycache__/
+*.pyc
