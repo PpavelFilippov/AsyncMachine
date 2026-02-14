@@ -398,7 +398,143 @@ def simulate_generator_mode(params=None, t_end=2.0, dt_out=1e-4):
         'U1A': U1A_arr, 'U1B': U1B_arr, 'U1C': U1C_arr, 'U_mod': U_mod,
         'Psi1A': Psi1A, 'P_elec': P_elec, 'P_mech': P_mech,
         'imA': imA_arr, 'imB': imB_arr, 'imC': imC_arr,
-        'model': model, 'params': params
+        'model': model, 'params': params,
+        'mode_name': 'ГЕНЕРАТОРНЫЙ РЕЖИМ'
+    }
+    return results
+
+
+def simulate_motor_mode(params=None, t_end=2.0, dt_out=1e-4):
+    """
+    Моделирование установившегося моторного режима асинхронной машины.
+    Возвращает словарь временных рядов для анализа и построения графиков.
+    """
+    if params is None:
+        params = MachineParameters()
+
+    model = AsyncGeneratorModel(params)
+
+    omega_sync = 2 * np.pi * params.fn / params.p  # рад/с
+    Mc_nom = params.P2n / (2 * np.pi * params.n_nom / 60.0)
+    t_ramp = 0.5
+
+    print(f"\nСинхронная скорость: w1/p = {omega_sync:.2f} рад/с "
+          f"({omega_sync * 60 / (2 * np.pi):.0f} об/мин)")
+
+    def Mc_func(t, omega_r):
+        if t < t_ramp:
+            return Mc_nom * (t / t_ramp)
+        return Mc_nom
+
+    omega0 = omega_sync
+    y0 = np.zeros(7)
+    y0[6] = omega0
+
+    print("\nЗапуск моделирования моторного режима...")
+    print(f"  Время моделирования: {t_end:.1f} с")
+    print(f"  Момент нагрузки: {Mc_nom:.0f} Нм (нарастание за {t_ramp:.1f} с)")
+    print(f"  Начальная скорость: {omega0:.2f} рад/с")
+
+    t_span = (0, t_end)
+    t_eval = np.arange(0, t_end, dt_out)
+
+    sol = solve_ivp(
+        fun=lambda t, y: model.ode_system(t, y, Mc_func),
+        t_span=t_span,
+        y0=y0,
+        method='RK45',
+        t_eval=t_eval,
+        rtol=1e-6,
+        atol=1e-8,
+        max_step=1e-4
+    )
+
+    if not sol.success:
+        print(f"  ОШИБКА: {sol.message}")
+        return None
+
+    print(f"  Решение получено. Точек: {len(sol.t)}")
+
+    t = sol.t
+    i1A = sol.y[0]
+    i1B = sol.y[1]
+    i1C = sol.y[2]
+    i2a = sol.y[3]
+    i2b = sol.y[4]
+    i2c = sol.y[5]
+    omega_r = sol.y[6]
+
+    N = len(t)
+    Mem = np.zeros(N)
+    I1_mod = np.zeros(N)
+    I2_mod = np.zeros(N)
+    U1A_arr = np.zeros(N)
+    U1B_arr = np.zeros(N)
+    U1C_arr = np.zeros(N)
+    U_mod = np.zeros(N)
+    slip = np.zeros(N)
+    Psi1A = np.zeros(N)
+    imA_arr = np.zeros(N)
+    imB_arr = np.zeros(N)
+    imC_arr = np.zeros(N)
+    Im_mod = np.zeros(N)
+
+    for k in range(N):
+        Mem[k] = model.electromagnetic_torque(
+            i1A[k], i1B[k], i1C[k], i2a[k], i2b[k], i2c[k])
+        I1_mod[k] = model.result_current_module(i1A[k], i1B[k], i1C[k])
+        I2_mod[k] = model.result_current_module(i2a[k], i2b[k], i2c[k])
+
+        Us = model.stator_voltages(t[k])
+        U1A_arr[k] = Us[0]
+        U1B_arr[k] = Us[1]
+        U1C_arr[k] = Us[2]
+        U_mod[k] = model.result_voltage_module(Us[0], Us[1], Us[2])
+
+        if abs(omega_sync) > 1e-10:
+            slip[k] = (omega_sync - omega_r[k]) / omega_sync
+        else:
+            slip[k] = 0.0
+
+        Psi1A[k] = model.flux_linkage_phaseA(
+            i1A[k], i1B[k], i1C[k], i2a[k], i2b[k], i2c[k])
+
+        imA_arr[k] = i1A[k] + i2a[k]
+        imB_arr[k] = i1B[k] + i2b[k]
+        imC_arr[k] = i1C[k] + i2c[k]
+        Im_mod[k] = model.result_current_module(imA_arr[k], imB_arr[k], imC_arr[k])
+
+    n_rpm = omega_r * 60 / (2 * np.pi)
+    P_elec = U1A_arr * i1A + U1B_arr * i1B + U1C_arr * i1C
+    P_mech = Mem * omega_r
+
+    print("\n")
+    print("  РЕЗУЛЬТАТЫ МОДЕЛИРОВАНИЯ (МОТОРНЫЙ РЕЖИМ)")
+
+    idx_ss = int(0.75 * N)
+    print(f"  Скорость: {np.mean(n_rpm[idx_ss:]):.1f} об/мин")
+    print(f"  Скольжение: {np.mean(slip[idx_ss:]):.5f}")
+    print(f"  Мэм (среднее): {np.mean(Mem[idx_ss:]):.1f} Нм")
+    print(f"  |I1| (среднее): {np.mean(I1_mod[idx_ss:]):.1f} А")
+    print(f"  |I1| (max): {np.max(I1_mod[idx_ss:]):.1f} А")
+    print(f"  |I2| (среднее): {np.mean(I2_mod[idx_ss:]):.1f} А")
+    print(f"  |Im| (среднее): {np.mean(Im_mod[idx_ss:]):.1f} А")
+    print(f"  |U| (среднее): {np.mean(U_mod[idx_ss:]):.1f} В")
+    print(f"  P_элек (среднее): {np.mean(P_elec[idx_ss:]) / 1e3:.1f} кВт")
+    print(f"  P_мех (среднее): {np.mean(P_mech[idx_ss:]) / 1e3:.1f} кВт")
+    print("=" * 60)
+
+    results = {
+        't': t, 'i1A': i1A, 'i1B': i1B, 'i1C': i1C,
+        'i2a': i2a, 'i2b': i2b, 'i2c': i2c,
+        'omega_r': omega_r, 'n_rpm': n_rpm,
+        'Mem': Mem, 'slip': slip,
+        'I1_mod': I1_mod, 'I2_mod': I2_mod, 'Im_mod': Im_mod,
+        'U1A': U1A_arr, 'U1B': U1B_arr, 'U1C': U1C_arr, 'U_mod': U_mod,
+        'Psi1A': Psi1A, 'P_elec': P_elec, 'P_mech': P_mech,
+        'imA': imA_arr, 'imB': imB_arr, 'imC': imC_arr,
+        'model': model, 'params': params,
+        'mode_name': 'МОТОРНЫЙ РЕЖИМ'
     }
     return results
 
@@ -471,14 +607,15 @@ def simulate_motor_start(params=None, t_end=1.5, dt_out=1e-4):
     return results
 
 def plot_generator_results(res, save_path=None):
-    """Построение графиков генераторного режима."""
+    """Построение графиков для установившегося режима."""
 
     t = res['t']
     t_ms = t * 1000  # в мс для детальных графиков
+    mode_name = res.get('mode_name', 'УСТАНОВИВШИЙСЯ РЕЖИМ')
 
     fig, axes = plt.subplots(4, 2, figsize=(16, 18))
-    fig.suptitle('Результаты моделирования\n'
-                 '(Трёхфазные координаты)',
+    fig.suptitle(f'Результаты моделирования\n'
+                 f'({mode_name})',
                  fontsize=13, fontweight='bold')
 
     ax = axes[0, 0]
@@ -610,15 +747,16 @@ def plot_motor_start_results(res, save_path=None):
 
 
 def plot_detailed_waveforms(res, save_path=None):
-    """Детальные осциллограммы установившегося режима генератора."""
+    """Детальные осциллограммы установившегося режима."""
 
     t = res['t']
     t_start = max(0, t[-1] - 0.1)  # Последние 100 мс
     mask = t >= t_start
     tt = (t[mask] - t[mask][0]) * 1000  # мс от начала окна
+    mode_name = res.get('mode_name', 'УСТАНОВИВШИЙСЯ РЕЖИМ')
 
     fig, axes = plt.subplots(3, 2, figsize=(16, 14))
-    fig.suptitle('ОСЦИЛЛОГРАММЫ УСТАНОВИВШЕГОСЯ ГЕНЕРАТОРНОГО РЕЖИМА\n'
+    fig.suptitle(f'ОСЦИЛЛОГРАММЫ {mode_name}\n'
                  '(последние 100 мс моделирования)',
                  fontsize=13, fontweight='bold')
 
@@ -714,7 +852,16 @@ if __name__ == '__main__':
               f"(кратность: {M_max / (params.P2n / (2 * np.pi * params.n_nom / 60)):.2f})")
 
 
-    print("  ЭТАП 2: Генераторный режим")
+    print("  ЭТАП 2: Моторный режим")
+
+    res_motor_mode = simulate_motor_mode(params, t_end=2.0, dt_out=2e-4)
+    if res_motor_mode is not None:
+        plot_generator_results(res_motor_mode,
+                               save_path=os.path.join(output_dir, 'motor_mode.png'))
+        plot_detailed_waveforms(res_motor_mode,
+                                save_path=os.path.join(output_dir, 'motor_waveforms.png'))
+
+    print("  ЭТАП 3: Генераторный режим")
 
     res_gen = simulate_generator_mode(params, t_end=2.0, dt_out=2e-4)
     if res_gen is not None:
