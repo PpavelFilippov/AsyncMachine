@@ -1,32 +1,5 @@
 """
 MultiMachineSimulation — связанное моделирование N машин на общей шине.
-
-KVL для шины:
-    E_src_phi = R_src * I_total_phi + L_src * dI_total_phi/dt + U_bus_phi
-
-KCL:
-    I_total_phi = sum_k i1phi_k   (сумма токов статора фазы phi по всем машинам)
-
-Для каждой машины k уравнения:
-    [L_k] * di_k/dt = [U_stator_k] − [R_k*i_k] − [E_rot_k]
-    J_k * domega_k/dt   = M_em_k − M_c_k
-
-Напряжение на зажимах машины k зависит от типа неисправности:
-    - нет fault:       U_stator_k_phi = U_bus_phi
-    - ground fault:    U_stator_k_phi = 0  (ток свободен, но фаза заземлена)
-    - open circuit:    i1_k_phi = 0, di1_k_phi/dt = 0  (фаза не подключена)
-
-Глобальная система
-==================
-
-Собираем единую матрицу [L_global] * d[x]/dt = [b_global],
-где x — объединённый вектор всех токов и скоростей.
-
-Для open circuit: зануляем строку/столбец в L_global,
-ставим di/dt = 0 и принудительно i = 0.
-
-Для ground fault: U_stator_k_phi = 0, но ток этой фазы свободен
-и входит в I_total, нагружая источник
 """
 from __future__ import annotations
 
@@ -48,12 +21,15 @@ from sources.three_phase_sine import ThreePhaseSineSource
 from loads.base import LoadTorque
 from faults.base import Fault
 
+# Число электрических переменных на машину (без omega_r)
+ELEC_SIZE = 6
+
 
 @dataclass
 class SourceImpedance:
     """Импеданс линии/источника (на фазу)"""
-    R: float = 0.005    # Ом (активное сопротивление линии)
-    L: float = 5e-5     # Гн (индуктивность линии)
+    R: float = 0.005    # Ом
+    L: float = 5e-5     # Гн
 
 
 @dataclass
@@ -102,7 +78,6 @@ class MultiMachineSimulation:
         return self
 
     def source_impedance(self, z: SourceImpedance) -> MultiMachineSimulation:
-        """Задать импеданс линии/источника"""
         self._source_z = z
         return self
 
@@ -164,6 +139,7 @@ class MultiMachineSimulation:
         src = self._source
         z = self._source_z
         total_vars = STATE_SIZE * n_mach
+        elec_total = ELEC_SIZE * n_mach
 
         # Создать экземпляры моделей
         models: List[MachineModel] = []
@@ -175,7 +151,7 @@ class MultiMachineSimulation:
         for i, slot in enumerate(self._machines):
             y0[i * STATE_SIZE + 6] = slot.omega0
 
-        # Кэш: матрицы индуктивностей машин (для линейных - постоянны)
+        # Кэш: матрицы индуктивностей машин 6x6
         L_machines = []
         for model in models:
             if hasattr(model, '_L_matrix'):
@@ -183,15 +159,30 @@ class MultiMachineSimulation:
             else:
                 L_machines.append(model._build_inductance_matrix())
 
+        # Предвычислить базовую глобальную матрицу (без faults)
+        # L_global_base = block_diag(L_m0, L_m1, ...) + L_src в статорных позициях
+        L_global_base = np.zeros((elec_total, elec_total))
+        for i in range(n_mach):
+            off = i * ELEC_SIZE
+            L_global_base[off:off+ELEC_SIZE, off:off+ELEC_SIZE] = L_machines[i]
+
+        # L_src добавляется ко ВСЕМ парам (i, j) в статорных фазах:
+        # L_global[6*i + ph, 6*j + ph] += L_src  для ph = 0,1,2
+        for ph in range(3):
+            for i in range(n_mach):
+                for j in range(n_mach):
+                    L_global_base[i * ELEC_SIZE + ph,
+                                  j * ELEC_SIZE + ph] += z.L
+
 
         # Правая часть связанной системы ОДУ
         def rhs(t: float, y: np.ndarray) -> np.ndarray:
-            E_src = src(t)  # ЭДС источника [3]
+            E_src = src(t)
             dydt = np.zeros(total_vars)
 
-            # 1. Собрать информацию о faults для каждой машины
-            open_sets: List[Set[int]] = []    # фазы с обрывом
-            ground_sets: List[Set[int]] = []  # фазы с заземлением
+            # 1. Собрать faults
+            open_sets: List[Set[int]] = []
+            ground_sets: List[Set[int]] = []
             for slot in self._machines:
                 op = set()
                 gr = set()
@@ -201,93 +192,91 @@ class MultiMachineSimulation:
                 open_sets.append(op)
                 ground_sets.append(gr)
 
-            # 2. Извлечь токи статора каждой машины
-            stator_currents = []  # [n_mach][3] - i1A, i1B, i1C
-            for i in range(n_mach):
-                off = i * STATE_SIZE
-                stator_currents.append(y[off:off+3].copy())
-
-            # 3. Вычислить суммарный ток по каждой фазе
-            #    (с учётом обрывов: оборванные фазы не вносят ток)
+            # 2. Суммарный ток для R_src (обрыв исключает фазу)
             I_total = np.zeros(3)
             for i in range(n_mach):
+                off = i * STATE_SIZE
                 for ph in range(3):
                     if ph not in open_sets[i]:
-                        I_total[ph] += stator_currents[i][ph]
+                        I_total[ph] += y[off + ph]
 
-            # 4. Напряжение на шине: U_bus = E_src - R_src*I_total
-            #    (индуктивная часть L_src·dI_total/dt учитывается
-            #     через добавку L_src в матрицу индуктивностей)
+            # 3. U_bus = E_src - R_src * I_total
             U_bus = E_src - z.R * I_total
 
-            # 5. Для каждой машины собрать и решить уравнения
+            # 4. Собрать глобальный вектор правой части b (6N)
+            b_global = np.zeros(elec_total)
             for i in range(n_mach):
-                off = i * STATE_SIZE
-                y_i = y[off: off + STATE_SIZE]
+                state_off = i * STATE_SIZE
+                elec_off = i * ELEC_SIZE
+                y_i = y[state_off: state_off + STATE_SIZE]
                 i1A, i1B, i1C = y_i[0], y_i[1], y_i[2]
                 i2a, i2b, i2c = y_i[3], y_i[4], y_i[5]
                 omega_r = y_i[6]
-                slot = self._machines[i]
                 model = models[i]
 
-                # Токи намагничивания
                 imA = i1A + i2a
                 imB = i1B + i2b
                 imC = i1C + i2c
 
-                # ЭДС вращения ротора
                 E_rot = model._rotor_emf(i2a, i2b, i2c, imA, imB, imC, omega_r)
 
-                # Напряжение на зажимах статора с учётом faults
+                # Напряжение на зажимах с учётом ground fault
                 U_stator = U_bus.copy()
                 for ph in ground_sets[i]:
-                    U_stator[ph] = 0.0  # заземление: U = 0
+                    U_stator[ph] = 0.0
 
-                # Правая часть электрических уравнений: b = U - R*i - E_rot
-                b = np.array([
-                    U_stator[0] - model.R1 * i1A,
-                    U_stator[1] - model.R1 * i1B,
-                    U_stator[2] - model.R1 * i1C,
-                    -model.R2 * i2a - E_rot[0],
-                    -model.R2 * i2b - E_rot[1],
-                    -model.R2 * i2c - E_rot[2],
-                ])
+                b_global[elec_off + 0] = U_stator[0] - model.R1 * i1A
+                b_global[elec_off + 1] = U_stator[1] - model.R1 * i1B
+                b_global[elec_off + 2] = U_stator[2] - model.R1 * i1C
+                b_global[elec_off + 3] = -model.R2 * i2a - E_rot[0]
+                b_global[elec_off + 4] = -model.R2 * i2b - E_rot[1]
+                b_global[elec_off + 5] = -model.R2 * i2c - E_rot[2]
 
-                # Матрица индуктивностей: L_machine + L_src на диагонали статора
-                # (L_src добавляется ко всем здоровым фазам, т.к. ток течёт
-                #  через общий импеданс линии)
-                L = L_machines[i].copy()
-                for ph in range(3):
-                    if ph not in open_sets[i]:
-                        L[ph, ph] += z.L  # индуктивность линии
-                        # Перекрёстная связь через источник:
-                        # dI_total/dt содержит di_других_машин/dt,
-                        # но это делает систему неблочной.
-                        # Приближение: добавляем L_src только на диагональ
-                        # (точно для одной машины, приближение для N>1
-                        #  при малом L_src << L_machine).
-                        # Для полной точности — глобальная матрица (ниже).
+            # 5. Собрать глобальную L с учётом faults
+            L_global = L_global_base.copy()
 
-                # Обрыв фазы: строка/столбец этой фазы -> di/dt = 0
+            for i in range(n_mach):
+                elec_off_i = i * ELEC_SIZE
                 for ph in open_sets[i]:
-                    L[ph, :] = 0.0
-                    L[:, ph] = 0.0
-                    L[ph, ph] = 1.0   # единица на диагонали
-                    b[ph] = 0.0       # di/dt = 0
-                    # Также принудительно зануляем ток
-                    # (через демпфирование: b = -i/tau, tau очень мал)
-                    b[ph] = -y_i[ph] / 1e-5  # быстро загоняем в 0
+                    # Обрыв фазы ph у машины i:
+                    # - обнулить строку и столбец в глобальной матрице
+                    row = elec_off_i + ph
+                    L_global[row, :] = 0.0
+                    L_global[:, row] = 0.0
+                    L_global[row, row] = 1.0
+                    # - демпфирование тока к нулю
+                    state_off = i * STATE_SIZE
+                    b_global[row] = -y[state_off + ph] / 1e-5
 
-                # Решить L * di/dt = b
-                di_dt = np.linalg.solve(L, b)
+                    # Также убрать L_src-связь этой фазы
+                    # с другими машинами (уже обнулено выше
+                    # через L_global[:, row] = 0 и L_global[row, :] = 0)
+
+            # 6. Решить глобальную систему: L_global * di/dt = b_global
+            di_dt_global = np.linalg.solve(L_global, b_global)
+
+            # 7. Раскидать результаты + механика
+            for i in range(n_mach):
+                state_off = i * STATE_SIZE
+                elec_off = i * ELEC_SIZE
+
+                dydt[state_off: state_off + ELEC_SIZE] = \
+                    di_dt_global[elec_off: elec_off + ELEC_SIZE]
 
                 # Механическое уравнение
-                Mem = model.electromagnetic_torque(i1A, i1B, i1C, i2a, i2b, i2c)
-                Mc_func = slot.load if slot.load is not None else lambda t_, w_: 0.0
-                Mc = Mc_func(t, omega_r)
+                y_i = y[state_off: state_off + STATE_SIZE]
+                i1A, i1B, i1C = y_i[0], y_i[1], y_i[2]
+                i2a, i2b, i2c = y_i[3], y_i[4], y_i[5]
+                omega_r = y_i[6]
 
-                dydt[off:off+6] = di_dt
-                dydt[off+6] = (Mem - Mc) / model.J
+                model = models[i]
+                slot = self._machines[i]
+                Mem = model.electromagnetic_torque(i1A, i1B, i1C,
+                                                   i2a, i2b, i2c)
+                Mc_func = slot.load if slot.load is not None \
+                    else lambda t_, w_: 0.0
+                Mc = Mc_func(t, omega_r)
+                dydt[state_off + 6] = (Mem - Mc) / model.J
 
             return dydt
 
@@ -303,7 +292,6 @@ class MultiMachineSimulation:
 
         print(f"  Решение получено. Точек: {len(t_arr)}")
 
-        # Разобрать результаты
         return self._build_results(t_arr, y_arr, models, n_mach)
 
 
@@ -312,7 +300,7 @@ class MultiMachineSimulation:
         z = self._source_z
         print("\n")
         print(f"  {self._scenario_name}")
-        print(f"  Машин: {n_mach}")
+        print(f"  Машин: {n_mach}, связь: глобальная матрица {6*n_mach}×{6*n_mach}")
         print(f"  Солвер: {self._solver.describe()}")
         print(f"  Источник: {self._source.describe()}")
         print(f"  Импеданс линии: R={z.R:.4f} Ом, L={z.L*1e3:.4f} мГн")
@@ -367,7 +355,6 @@ class MultiMachineSimulation:
             for i in range(n_mach):
                 off = i * STATE_SIZE
                 for ph in range(3):
-                    # Проверить обрыв
                     is_open = False
                     for fault in self._machines[i].faults:
                         if ph in fault.get_open_phases(t_arr[k]):
@@ -393,7 +380,7 @@ class MultiMachineSimulation:
         )
 
         print(f"\n{multi_res.summary()}")
-        print("/n")
+        print("\n")
         return multi_res
 
     @staticmethod
@@ -432,16 +419,14 @@ class MultiMachineSimulation:
             i1A, i1B, i1C = res.i1A[k], res.i1B[k], res.i1C[k]
             i2a, i2b, i2c = res.i2a[k], res.i2b[k], res.i2c[k]
 
-            res.Mem[k] = machine.electromagnetic_torque(i1A, i1B, i1C, i2a, i2b, i2c)
+            res.Mem[k] = machine.electromagnetic_torque(i1A, i1B, i1C,
+                                                         i2a, i2b, i2c)
             if load is not None:
                 res.Mc[k] = load(res.t[k], res.omega_r[k])
             res.I1_mod[k] = machine.result_current_module(i1A, i1B, i1C)
             res.I2_mod[k] = machine.result_current_module(i2a, i2b, i2c)
 
-            # Реальное напряжение на зажимах = U_bus - Z_src * i (для этой машины)
-            # Но проще: U_bus (общая) с учётом ground fault
             E = source(res.t[k])
-            # Суммарный ток для расчёта U_bus
             I_tot = np.zeros(3)
             for j in range(n_mach):
                 off_j = j * STATE_SIZE
@@ -459,7 +444,8 @@ class MultiMachineSimulation:
             if abs(omega_sync) > 1e-10:
                 res.slip[k] = (omega_sync - res.omega_r[k]) / omega_sync
 
-            res.Psi1A[k] = machine.flux_linkage_phaseA(i1A, i1B, i1C, i2a, i2b, i2c)
+            res.Psi1A[k] = machine.flux_linkage_phaseA(i1A, i1B, i1C,
+                                                        i2a, i2b, i2c)
             res.imA[k] = i1A + i2a
             res.imB[k] = i1B + i2b
             res.imC[k] = i1C + i2c
