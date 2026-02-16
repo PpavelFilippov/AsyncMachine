@@ -12,7 +12,7 @@ import numpy as np
 
 from core.parameters import MachineParameters
 from solvers import ScipySolver, SolverConfig
-from scenarios import MotorStartScenario, MotorSteadyScenario, GeneratorSteadyScenario, MotorStepLoadScenario
+from scenarios import MotorStartScenario, MotorSteadyScenario, GeneratorSteadyScenario, MotorStepLoadScenario, MotorNoLoadScenario
 from faults import OpenPhaseFault, GroundFault
 from sources import ThreePhaseSineSource
 from loads import RampTorque
@@ -75,6 +75,12 @@ def main():
     )
     plot_steady_state(res_step, save_path=os.path.join(output_dir, "motor_step.png"))
 
+    res_step = (
+        SimulationBuilder(params)
+        .scenario(MotorNoLoadScenario(t_end=4.0, Mc_idle=0.5))
+        .run()
+    )
+    plot_steady_state(res_step, save_path=os.path.join(output_dir, "motor_no_load.png"))
 
     # 5. ДВЕ МАШИНЫ: замыкание фазы A на землю у АД-1
     #    (ток КЗ просаживает шину -> влияет на АД-2)

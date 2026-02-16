@@ -3,6 +3,7 @@ from .motor_start import MotorStartScenario
 from .motor_steady import MotorSteadyScenario
 from .generator_steady import GeneratorSteadyScenario
 from .motor_step_load import MotorStepLoadScenario
+from .motor_no_load import MotorNoLoadScenario
 
 __all__ = [
     "Scenario",
@@ -10,4 +11,5 @@ __all__ = [
     "MotorSteadyScenario",
     "GeneratorSteadyScenario",
     "MotorStepLoadScenario",
+    "MotorNoLoadScenario",
 ]
