@@ -124,14 +124,14 @@ def plot_steady_state(res: SimulationResults, save_path: Optional[str] = None):
     axes[3, 0].set(xlabel='Время, с', ylabel='psi, Вб',
                     title='Потокосцепление фазы A статора')
 
-    # Мощности
-    if res.P_elec is not None:
-        axes[3, 1].plot(t, res.P_elec / 1e3, 'b-', lw=0.5, label='P электр.')
-    if res.P_mech is not None:
-        axes[3, 1].plot(t, res.P_mech / 1e3, 'r-', lw=0.5, label='P мех.')
+    # Момент нагрузки на валу
+    if res.Mc is not None:
+        axes[3, 1].plot(t, res.Mc, 'r-', lw=0.8, label='Mc (нагрузка)')
+    if res.Mem is not None:
+        axes[3, 1].plot(t, res.Mem, 'b-', lw=0.4, alpha=0.5, label='Mэм')
     axes[3, 1].axhline(y=0, color='k', lw=0.5, ls='--')
-    axes[3, 1].set(xlabel='Время, с', ylabel='Мощность, кВт',
-                    title='Электрическая и механическая мощность')
+    axes[3, 1].set(xlabel='Время, с', ylabel='Момент, Нм',
+                    title='Момент нагрузки на валу Mc(t)')
     axes[3, 1].legend(fontsize=8)
 
     plt.tight_layout(rect=[0, 0, 1, 0.96])

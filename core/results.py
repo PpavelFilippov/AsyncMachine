@@ -30,7 +30,7 @@ class SimulationResults:
     i2b: np.ndarray
     i2c: np.ndarray
 
-    #Механика
+    # Механика
     omega_r: np.ndarray
 
     #Метаданные
@@ -55,6 +55,7 @@ class SimulationResults:
     imC: Optional[np.ndarray] = None
     P_elec: Optional[np.ndarray] = None
     P_mech: Optional[np.ndarray] = None
+    Mc: Optional[np.ndarray] = None  # момент нагрузки на валу
 
     # Дополнительные данные (для расширения)
     extra: Dict[str, Any] = field(default_factory=dict)

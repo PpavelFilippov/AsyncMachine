@@ -1,8 +1,4 @@
-﻿from faults.base import Fault
-from faults.open_phase import OpenPhaseFault
+﻿from .base import Fault, FaultType
+from .open_phase import OpenPhaseFault, GroundFault
 
-__all__ = [
-    "Fault",
-    "OpenPhaseFault",
-]
-
+__all__ = ["Fault", "FaultType", "OpenPhaseFault", "GroundFault"]

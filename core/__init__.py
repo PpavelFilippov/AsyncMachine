@@ -1,28 +1,13 @@
-﻿from core.parameters import MachineParameters
-from core.state import (
-    I1A,
-    I1B,
-    I1C,
-    I2A,
-    I2B,
-    I2C,
-    OMEGA_R,
-    STATE_SIZE,
-    StateView,
-    make_initial_state,
-)
+﻿from .parameters import MachineParameters
+from .state import StateView, make_initial_state, STATE_SIZE
+from .results import SimulationResults
+from .multi_results import MultiMachineResults
 
 __all__ = [
     "MachineParameters",
-    "I1A",
-    "I1B",
-    "I1C",
-    "I2A",
-    "I2B",
-    "I2C",
-    "OMEGA_R",
-    "STATE_SIZE",
     "StateView",
     "make_initial_state",
+    "STATE_SIZE",
+    "SimulationResults",
+    "MultiMachineResults",
 ]
-

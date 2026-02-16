@@ -145,10 +145,11 @@ class SimulationBuilder:
             solver_name=self._solver.describe(),
         )
 
-        # 8. Пост-обработка
-        self._post_process(results, machine, source)
+        # 8. Пост-обработка (вычисление derived quantities)
+        self._post_process(results, machine, source, load)
 
         print(f"\n{results.summary()}")
+        print("\n")
 
         return results
 
@@ -159,12 +160,14 @@ class SimulationBuilder:
         res: SimulationResults,
         machine: MachineModel,
         source,
+        load=None,
     ):
         """Вычислить производные величины (момент, модули, мощности, etc.)"""
         N = res.N
         params = res.params
 
         res.Mem = np.zeros(N)
+        res.Mc = np.zeros(N)
         res.I1_mod = np.zeros(N)
         res.I2_mod = np.zeros(N)
         res.Im_mod = np.zeros(N)
@@ -185,6 +188,8 @@ class SimulationBuilder:
             i2a, i2b, i2c = res.i2a[k], res.i2b[k], res.i2c[k]
 
             res.Mem[k] = machine.electromagnetic_torque(i1A, i1B, i1C, i2a, i2b, i2c)
+            if load is not None:
+                res.Mc[k] = load(res.t[k], res.omega_r[k])
             res.I1_mod[k] = machine.result_current_module(i1A, i1B, i1C)
             res.I2_mod[k] = machine.result_current_module(i2a, i2b, i2c)
 

@@ -75,3 +75,39 @@ class MotorStartTorque(LoadTorque):
             f"Пуск: трение {self.Mc_friction:.0f} Нм, "
             f"нагрузка {self.Mc_load:.0f} Нм с t={self.t_load_start:.1f} с"
         )
+
+
+class StepTorque(LoadTorque):
+    """
+    Ступенчатый наброс нагрузки.
+
+    До t_step - Mc_idle (момент холостого хода / трение).
+    После t_step — мгновенно Mc_load
+    """
+
+    def __init__(
+        self,
+        Mc_load: float,
+        t_step: float = 2.0,
+        Mc_idle: float = 0.0,
+    ):
+        """
+        Args:
+            Mc_load: момент после наброса, Нм
+            t_step: момент наброса нагрузки, с
+            Mc_idle: момент до наброса (холостой ход), Нм
+        """
+        self.Mc_load = Mc_load
+        self.t_step = t_step
+        self.Mc_idle = Mc_idle
+
+    def __call__(self, t: float, omega_r: float) -> float:
+        if t < self.t_step:
+            return self.Mc_idle
+        return self.Mc_load
+
+    def describe(self) -> str:
+        return (
+            f"Ступенька: {self.Mc_idle:.0f} Нм → {self.Mc_load:.0f} Нм "
+            f"в t={self.t_step:.2f} с"
+        )

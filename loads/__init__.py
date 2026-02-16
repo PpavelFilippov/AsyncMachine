@@ -1,12 +1,4 @@
-﻿"""Public exports for load torque models."""
+﻿from .base import LoadTorque
+from .constant import ConstantTorque, RampTorque, MotorStartTorque, StepTorque
 
-from loads.base import LoadTorque
-from loads.constant import ConstantTorque, MotorStartTorque, RampTorque
-
-__all__ = [
-    "LoadTorque",
-    "ConstantTorque",
-    "RampTorque",
-    "MotorStartTorque",
-]
-
+__all__ = ["LoadTorque", "ConstantTorque", "RampTorque", "MotorStartTorque", "StepTorque"]
