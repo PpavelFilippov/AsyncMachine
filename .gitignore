@@ -11,3 +11,4 @@ env/
 .idea/
 __pycache__/
 *.pyc
+*.csv
