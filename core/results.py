@@ -105,6 +105,10 @@ class SimulationResults:
             lines.append(f"  Mэм (уст.): {np.mean(self.Mem[ss]):.1f} Нм")
         if self.I1_mod is not None:
             lines.append(f"  |I1| (уст.): {np.mean(self.I1_mod[ss]):.1f} А")
+            i1a_rms = np.sqrt(np.mean(self.i1A[ss] ** 2))
+            i1b_rms = np.sqrt(np.mean(self.i1B[ss] ** 2))
+            lines.append(f"  I1A (уст., фазн., RMS): {i1a_rms:.1f} А")
+            lines.append(f"  I1B (уст., фазн., RMS): {i1b_rms:.1f} А")
         if self.P_elec is not None:
             lines.append(f"  P_элек (уст.): {np.mean(self.P_elec[ss]) / 1e3:.1f} кВт")
         if self.P_mech is not None:
