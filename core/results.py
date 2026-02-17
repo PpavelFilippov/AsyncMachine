@@ -104,7 +104,10 @@ class SimulationResults:
         if self.Mem is not None:
             lines.append(f"  Mэм (уст.): {np.mean(self.Mem[ss]):.1f} Нм")
         if self.I1_mod is not None:
-            lines.append(f"  |I1| (уст.): {np.mean(self.I1_mod[ss]):.1f} А")
+            i1_p50 = float(np.median(self.I1_mod[ss]))
+            i1_p95 = float(np.percentile(self.I1_mod[ss], 95))
+            lines.append(f"  |I1| (уст., P50): {i1_p50:.1f} А")
+            lines.append(f"  |I1| (уст., P95): {i1_p95:.1f} А")
             i1a_rms = np.sqrt(np.mean(self.i1A[ss] ** 2))
             i1b_rms = np.sqrt(np.mean(self.i1B[ss] ** 2))
             lines.append(f"  I1A (уст., фазн., RMS): {i1a_rms:.1f} А")
