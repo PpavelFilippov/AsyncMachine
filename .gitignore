@@ -7,6 +7,8 @@ env/
 *.jpeg
 *.svg
 *.cache
+.jupyter_runtime/
 .idea/
 __pycache__/
 *.pyc
+*.csv
