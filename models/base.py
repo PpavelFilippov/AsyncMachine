@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Callable, Optional
+from typing import Callable
 
 import numpy as np
 
@@ -21,7 +21,6 @@ class MachineModel(ABC):
     Контракт:
       - ode_rhs(t, y, Mc_func, U_func)    -> dydt            - правая часть ОДУ
       - electromagnetic_torque(y)         -> float           - момент по вектору состояния
-      - stator_voltages(t)                -> [U1A, U1B, U1C] - напряжения (по умолчанию)
       - result_current_module(iA, iB, iC) -> float           - модуль тока
       - flux_linkage_phaseA(y)            -> float           - потокосцепление фазы A
     """
@@ -35,7 +34,7 @@ class MachineModel(ABC):
         t: float,
         y: np.ndarray,
         Mc_func: Callable[[float, float], float],
-        U_func: Optional[Callable[[float], np.ndarray]] = None,
+        U_func: Callable[[float], np.ndarray],
     ) -> np.ndarray:
         """
         Правая часть системы ОДУ.
@@ -44,7 +43,7 @@ class MachineModel(ABC):
             t: текущее время
             y: вектор состояния [i1A, i1B, i1C, i2a, i2b, i2c, omega_r]
             Mc_func: функция момента сопротивления Mc(t, omega_r)
-            U_func: опциональная функция напряжения U(t) -> [U1A, U1B, U1C]
+            U_func: функция напряжения U(t) -> [U1A, U1B, U1C]
 
         Returns:
             dydt: производные вектора состояния
@@ -57,14 +56,6 @@ class MachineModel(ABC):
         i2a: float, i2b: float, i2c: float,
     ) -> float:
         """Электромагнитный момент по мгновенным значениям токов"""
-        ...
-
-    @abstractmethod
-    def stator_voltages(
-        self, t: float, freq: Optional[float] = None,
-        amplitude: Optional[float] = None,
-    ) -> np.ndarray:
-        """Напряжения статора по умолчанию"""
         ...
 
     def result_current_module(self, iA: float, iB: float, iC: float) -> float:

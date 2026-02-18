@@ -10,7 +10,7 @@
 """
 from __future__ import annotations
 
-from typing import Callable, Optional
+from typing import Callable
 
 import numpy as np
 
@@ -35,11 +35,9 @@ class LinearInductionMachine(MachineModel):
         self.Lm = params.Lm
         self.J = params.J
         self.p = params.p
-        self.fn = params.fn
 
         self.L1 = self.L1s + self.Lm
         self.L2 = self.L2s + self.Lm
-        self.Um = params.Um
 
         # Матрица индуктивностей постоянна для линейной модели → кэшируем
         self._L_matrix = self._build_inductance_matrix()
@@ -51,18 +49,41 @@ class LinearInductionMachine(MachineModel):
 
     def _build_inductance_matrix(self) -> np.ndarray:
         """
-        Матрица индуктивностей 6x6
+        Полная матрица индуктивностей 6x6 в фазных координатах ABC.
+
+        Используется симметричная линейная модель с учётом взаимных связей
+        между всеми фазами статора и ротора:
+          - диагональные элементы: Lsigma + 2/3*Lm
+          - взаимные межфазные:   -1/3*Lm
+          - статер-ротор:
+              co-phase   +2/3*Lm
+              crossphase -1/3*Lm
         """
-        L1 = self.L1
-        L2 = self.L2
-        Lm = self.Lm
-        return np.array([
-            [L1,  0,  0, Lm,  0,  0],
-            [ 0, L1,  0,  0, Lm,  0],
-            [ 0,  0, L1,  0,  0, Lm],
-            [Lm,  0,  0, L2,  0,  0],
-            [ 0, Lm,  0,  0, L2,  0],
-            [ 0,  0, Lm,  0,  0, L2],
+        Mm = 2.0 * self.Lm / 3.0
+        m_off = -0.5 * Mm
+
+        L1_diag = self.L1s + Mm
+        L2_diag = self.L2s + Mm
+
+        Lss = np.array([
+            [L1_diag, m_off,   m_off],
+            [m_off,   L1_diag, m_off],
+            [m_off,   m_off,   L1_diag],
+        ])
+        Lrr = np.array([
+            [L2_diag, m_off,   m_off],
+            [m_off,   L2_diag, m_off],
+            [m_off,   m_off,   L2_diag],
+        ])
+        Lsr = np.array([
+            [Mm,    m_off, m_off],
+            [m_off, Mm,    m_off],
+            [m_off, m_off, Mm],
+        ])
+
+        return np.block([
+            [Lss, Lsr],
+            [Lsr, Lrr],
         ])
 
     def _rotor_emf(
@@ -80,22 +101,6 @@ class LinearInductionMachine(MachineModel):
         Ec = omega_e * inv_sqrt3 * (self.L2s * (i2a - i2b) + self.Lm * (imA - imB))
         return np.array([Ea, Eb, Ec])
 
-
-    # Публичный интерфейс MachineModel
-    def stator_voltages(
-        self, t: float,
-        freq: Optional[float] = None,
-        amplitude: Optional[float] = None,
-    ) -> np.ndarray:
-        """Трёхфазное синусоидальное напряжение статора"""
-        f = freq if freq is not None else self.fn
-        Um = amplitude if amplitude is not None else self.Um
-        omega = 2 * np.pi * f
-
-        U1A = Um * np.sin(omega * t)
-        U1B = Um * np.sin(omega * t - 2 * np.pi / 3)
-        U1C = Um * np.sin(omega * t + 2 * np.pi / 3)
-        return np.array([U1A, U1B, U1C])
 
     def electromagnetic_torque(
         self,
@@ -126,7 +131,7 @@ class LinearInductionMachine(MachineModel):
         t: float,
         y: np.ndarray,
         Mc_func: Callable[[float, float], float],
-        U_func: Optional[Callable[[float], np.ndarray]] = None,
+        U_func: Callable[[float], np.ndarray],
     ) -> np.ndarray:
         """
         Правая часть ОДУ:
@@ -143,10 +148,7 @@ class LinearInductionMachine(MachineModel):
         imC = i1C + i2c
 
         # Напряжения статора
-        if U_func is not None:
-            Us = U_func(t)
-        else:
-            Us = self.stator_voltages(t)
+        Us = U_func(t)
 
         # Короткозамкнутый ротор: Ur = 0
         E_rot = self._rotor_emf(i2a, i2b, i2c, imA, imB, imC, omega_r)
