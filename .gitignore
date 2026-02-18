@@ -12,3 +12,5 @@ env/
 __pycache__/
 *.pyc
 *.csv
+*.pdf
+.claude
