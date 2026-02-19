@@ -32,6 +32,7 @@ class MotorStepLoadScenario(Scenario):
         t_step: float = 2.0,
         Mc_load: float | None = None,
         Mc_idle: float = 0.0,
+        Mc_friction: float = 50.0,
     ):
         """
         Args:
@@ -44,6 +45,7 @@ class MotorStepLoadScenario(Scenario):
         self.t_step = t_step
         self._Mc_load = Mc_load
         self.Mc_idle = Mc_idle
+        self.Mc_friction = Mc_friction
 
     def name(self) -> str:
         return "ПУСК АД НА ХХ + НАБРОС НАГРУЗКИ"
@@ -60,9 +62,9 @@ class MotorStepLoadScenario(Scenario):
     def load_torque(self, params: MachineParameters) -> LoadTorque:
         Mc_load = self._Mc_load if self._Mc_load is not None else params.M_nom
         return StepTorque(
-            Mc_load=Mc_load,
+            Mc_load=Mc_load + self.Mc_friction,
             t_step=self.t_step,
-            Mc_idle=self.Mc_idle,
+            Mc_idle=self.Mc_idle + self.Mc_friction,
         )
 
     def t_span(self) -> tuple[float, float]:

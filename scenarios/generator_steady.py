@@ -27,10 +27,12 @@ class GeneratorSteadyScenario(Scenario):
         t_end: float = 2.0,
         Mc_drive: float = -1200.0,
         t_ramp: float = 0.5,
+        Mc_friction: float = 50.0,
     ):
         self.t_end = t_end
         self.Mc_drive = Mc_drive
         self.t_ramp = t_ramp
+        self.Mc_friction = Mc_friction
 
     def name(self) -> str:
         return "ГЕНЕРАТОРНЫЙ РЕЖИМ"
@@ -46,8 +48,9 @@ class GeneratorSteadyScenario(Scenario):
 
     def load_torque(self, params: MachineParameters) -> LoadTorque:
         return RampTorque(
-            Mc_target=self.Mc_drive,
+            Mc_target=self.Mc_drive + self.Mc_friction,
             t_ramp=self.t_ramp,
+            Mc_initial=self.Mc_friction,
         )
 
     def t_span(self) -> tuple[float, float]:

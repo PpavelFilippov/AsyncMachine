@@ -25,8 +25,8 @@ from sources.three_phase_thevenin import ThreePhaseSineTheveninSource
 class MotorNoLoadWithSourceScenario(MotorNoLoadScenario):
     """No-load scenario with injectable voltage source factory."""
 
-    def __init__(self, *, source_factory, t_end: float, mc_idle: float):
-        super().__init__(t_end=t_end, Mc_idle=mc_idle)
+    def __init__(self, *, source_factory, t_end: float, mc_idle: float, mc_friction: float):
+        super().__init__(t_end=t_end, Mc_idle=mc_idle, Mc_friction=mc_friction)
         self._source_factory = source_factory
 
     def voltage_source(self, params: MachineParameters):
@@ -39,6 +39,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--t-end", type=float, default=4.0, help="Simulation end time, s.")
     parser.add_argument("--mc-idle", type=float, default=0.0, help="No-load shaft torque, Nm.")
+    parser.add_argument("--mc-friction", type=float, default=50.0, help="Friction torque, Nm.")
     parser.add_argument("--r-series", type=float, default=0.02, help="Thevenin source per-phase series resistance, Ohm.")
     parser.add_argument("--l-series", type=float, default=2e-4, help="Thevenin source per-phase series inductance, H.")
     parser.add_argument("--steady-frac", type=float, default=0.75, help="Steady-state window start as fraction of full interval.")
@@ -159,11 +160,13 @@ def main() -> None:
         source_factory=ideal_source_factory,
         t_end=args.t_end,
         mc_idle=args.mc_idle,
+        mc_friction=args.mc_friction,
     )
     scenario_thevenin = MotorNoLoadWithSourceScenario(
         source_factory=thevenin_source_factory,
         t_end=args.t_end,
         mc_idle=args.mc_idle,
+        mc_friction=args.mc_friction,
     )
 
     rows = [

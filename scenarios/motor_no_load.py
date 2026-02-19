@@ -29,6 +29,7 @@ class MotorNoLoadScenario(Scenario):
         self,
         t_end: float = 4.0,
         Mc_idle: float = 0.0,
+        Mc_friction: float = 50.0,
     ):
         """
         Args:
@@ -37,6 +38,7 @@ class MotorNoLoadScenario(Scenario):
         """
         self.t_end = t_end
         self.Mc_idle = Mc_idle
+        self.Mc_friction = Mc_friction
 
     def name(self) -> str:
         return "ПУСК АД НА ХОЛОСТОМ ХОДУ"
@@ -52,7 +54,7 @@ class MotorNoLoadScenario(Scenario):
 
     def load_torque(self, params: MachineParameters) -> LoadTorque:
         return ConstantTorque(
-            Mc=self.Mc_idle,
+            Mc=self.Mc_idle + self.Mc_friction,
         )
 
     def t_span(self) -> tuple[float, float]:

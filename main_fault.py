@@ -39,8 +39,9 @@ class MotorNoLoadThevenin(MotorNoLoadScenario):
     """Холостой ход с Thevenin-источником и мех. потерями."""
 
     def __init__(self, t_end: float = 4.0, Mc_idle: float = 0.0,
+                 Mc_friction: float = 50.0,
                  r_series: float = 0.02, l_series: float = 2e-4):
-        super().__init__(t_end=t_end, Mc_idle=Mc_idle)
+        super().__init__(t_end=t_end, Mc_idle=Mc_idle, Mc_friction=Mc_friction)
         self._r_series = r_series
         self._l_series = l_series
 
@@ -55,9 +56,10 @@ class MotorStepLoadThevenin(MotorStepLoadScenario):
 
     def __init__(self, t_end: float = 4.0, t_step: float = 2.0,
                  Mc_load: float | None = None, Mc_idle: float = 0.0,
+                 Mc_friction: float = 50.0,
                  r_series: float = 0.02, l_series: float = 2e-4):
         super().__init__(t_end=t_end, t_step=t_step,
-                         Mc_load=Mc_load, Mc_idle=Mc_idle)
+                         Mc_load=Mc_load, Mc_idle=Mc_idle, Mc_friction=Mc_friction)
         self._r_series = r_series
         self._l_series = l_series
 
