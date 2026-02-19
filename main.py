@@ -1,30 +1,23 @@
-"""
-Точка входа - примеры использования.
+﻿"""Project entry point: single-machine simulation examples without faults."""
+from __future__ import annotations
 
-Сценарии одиночной машины: пуск, моторный, генераторный, обрыв фазы.
-
-Связанные сценарии (две машины на общей шине):
-  5. Замыкание фазы A на землю у АД-1 с восстановлением
-  6. Обрыв фазы A у АД-1 с восстановлением
-"""
 import os
-import numpy as np
 
 from core.parameters import MachineParameters
-from solvers import ScipySolver, SolverConfig
-from scenarios import MotorStartScenario, MotorSteadyScenario, GeneratorSteadyScenario, MotorStepLoadScenario, MotorNoLoadScenario
-from faults import OpenPhaseFault, GroundFault
-from sources import ThreePhaseSineSource
-from loads import RampTorque
+from plotting import plot_motor_start, plot_steady_state
+from scenarios import MotorNoLoadScenario, MotorStartScenario, MotorSteadyScenario, MotorStepLoadScenario
 from simulation import SimulationBuilder
-from simulation_multi import MultiMachineSimulation, SourceImpedance
-from plotting import (
-    plot_motor_start, plot_steady_state, plot_waveforms,
-    plot_multi_comparison, plot_multi_phase_currents,
-)
+from solvers import ScipySolver, SolverConfig
 
 
-def main():
+def main() -> None:
+    try:
+        import sys
+
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
     params = MachineParameters()
     print(params.info())
 
@@ -33,8 +26,6 @@ def main():
 
     solver_cfg = SolverConfig(dt_out=2e-4)
 
-
-    # 1–4: Одиночные сценарии (как раньше)
     res_start = (
         SimulationBuilder(params)
         .solver(ScipySolver("RK45", config=solver_cfg))
@@ -52,23 +43,24 @@ def main():
     plot_steady_state(res_motor, save_path=os.path.join(output_dir, "motor_mode.png"))
 
     res_step = (
-    SimulationBuilder(params)
-    .scenario(MotorStepLoadScenario(t_end=4.0, t_step=2.0))
-    .run()
+        SimulationBuilder(params)
+        .solver(ScipySolver("RK45", config=solver_cfg))
+        .scenario(MotorStepLoadScenario(t_end=4.0, t_step=2.0))
+        .run()
     )
     plot_steady_state(res_step, save_path=os.path.join(output_dir, "motor_step.png"))
 
-    res_step = (
+    res_no_load = (
         SimulationBuilder(params)
+        .solver(ScipySolver("RK45", config=solver_cfg))
         .scenario(MotorNoLoadScenario(t_end=4.0, Mc_idle=0.5))
         .run()
     )
-    plot_steady_state(res_step, save_path=os.path.join(output_dir, "motor_no_load.png"))
+    plot_steady_state(res_no_load, save_path=os.path.join(output_dir, "motor_no_load.png"))
 
-    # =========================================================
-    print(f"\nГрафики сохранены в: {output_dir}/")
-    for f in sorted(os.listdir(output_dir)):
-        print(f"  - {f}")
+    print(f"\nSaved plots in: {output_dir}/")
+    for f_name in sorted(os.listdir(output_dir)):
+        print(f"  - {f_name}")
 
 
 if __name__ == "__main__":

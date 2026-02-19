@@ -1,20 +1,19 @@
 ﻿"""
-SimulationBuilder — конструктор и оркестратор моделирования.
+SimulationBuilder - single-machine simulation orchestrator.
 
-Fluent API для конфигурации и запуска:
+Fluent API for configuration and run:
 
     results = (
         SimulationBuilder(params)
         .model(LinearInductionMachine)
         .solver(ScipySolver(method="RK45"))
         .scenario(MotorStartScenario())
-        .add_fault(OpenPhaseFault("A", t_start=1.0))
         .run()
     )
 """
 from __future__ import annotations
 
-from typing import Optional, Type, List
+from typing import Optional, Type
 
 import numpy as np
 
@@ -25,14 +24,13 @@ from models.linear import LinearInductionMachine
 from solvers.base import Solver, SolverConfig
 from solvers.scipy_solver import ScipySolver
 from scenarios.base import Scenario
-from faults.base import Fault
 
 
 class SimulationBuilder:
     """
-    Конструктор моделирования.
+    Single-machine simulation builder.
 
-    Собирает конфигурацию, затем run() запускает расчёт
+    Collects configuration and runs calculation with .run().
     """
 
     def __init__(self, params: Optional[MachineParameters] = None):
@@ -40,48 +38,34 @@ class SimulationBuilder:
         self._model_cls: Type[MachineModel] = LinearInductionMachine
         self._solver: Optional[Solver] = None
         self._scenario: Optional[Scenario] = None
-        self._faults: List[Fault] = []
         self._solver_config: Optional[SolverConfig] = None
-
 
     # Fluent API
     def model(self, model_cls: Type[MachineModel]) -> SimulationBuilder:
-        """Выбрать модель машины"""
+        """Choose machine model"""
         self._model_cls = model_cls
         return self
 
     def solver(self, solver: Solver) -> SimulationBuilder:
-        """Выбрать решатель"""
+        """Choose numerical solver"""
         self._solver = solver
         return self
 
     def solver_config(self, config: SolverConfig) -> SimulationBuilder:
-        """Задать параметры решателя"""
+        """Set solver configuration"""
         self._solver_config = config
         return self
 
     def scenario(self, scenario: Scenario) -> SimulationBuilder:
-        """Выбрать сценарий моделирования"""
+        """Choose simulation scenario"""
         self._scenario = scenario
         return self
 
-    def add_fault(self, fault: Fault) -> SimulationBuilder:
-        """Добавить неисправность"""
-        self._faults.append(fault)
-        return self
-
-    def clear_faults(self) -> SimulationBuilder:
-        """Убрать все неисправности"""
-        self._faults.clear()
-        return self
-
-
     # Execution
     def run(self) -> SimulationResults:
-        """Запустить моделирование и вернуть результаты"""
-        # Defaults
+        """Run simulation and return results"""
         if self._scenario is None:
-            raise ValueError("Сценарий не задан. Вызовите .scenario(...)")
+            raise ValueError("Scenario is not set. Call .scenario(...)")
 
         if self._solver is None:
             cfg = self._solver_config or SolverConfig()
@@ -92,10 +76,10 @@ class SimulationBuilder:
         params = self._params
         scenario = self._scenario
 
-        # 1. Создать модель
+        # 1. Create machine model
         machine = self._model_cls(params)
 
-        # 2. Получить компоненты из сценария
+        # 2. Read scenario components
         y0 = scenario.initial_state(params)
         source = scenario.voltage_source(params)
         load = scenario.load_torque(params)
@@ -103,24 +87,19 @@ class SimulationBuilder:
         r_src, l_src = self._source_impedance(source)
         source_is_nonideal = abs(r_src) > 0.0 or abs(l_src) > 0.0
 
-        # 3. Обернуть source с учётом faults
-        faults = self._faults
-
-        def source_emf_with_faults(t: float) -> np.ndarray:
-            U = source(t)
-            for fault in faults:
-                U = fault.modify_voltages(t, U)
-            return U
+        # 3. Source and load callbacks
+        def source_emf(t: float) -> np.ndarray:
+            return source(t)
 
         def Mc_func(t: float, omega_r: float) -> float:
             return load(t, omega_r)
 
-        # 4. Правая часть ОДУ
+        # 4. ODE right-hand side
         if source_is_nonideal:
             if not hasattr(machine, "_L_matrix") or not hasattr(machine, "_rotor_emf"):
                 raise NotImplementedError(
-                    "Неидеальный источник поддержан только для моделей "
-                    "с _L_matrix и _rotor_emf (например, LinearInductionMachine)."
+                    "Non-ideal source is supported only for models "
+                    "with _L_matrix and _rotor_emf (e.g. LinearInductionMachine)."
                 )
 
             L_eff = machine._L_matrix.copy()
@@ -138,7 +117,7 @@ class SimulationBuilder:
                 imC = i1C + i2c
                 E_rot = machine._rotor_emf(i2a, i2b, i2c, imA, imB, imC, omega_r)
 
-                E_src = source_emf_with_faults(t)
+                E_src = source_emf(t)
                 b = np.array([
                     E_src[0] - (machine.R1 + r_src) * i1A,
                     E_src[1] - (machine.R1 + r_src) * i1B,
@@ -159,43 +138,41 @@ class SimulationBuilder:
                 return dydt
         else:
             def rhs(t: float, y: np.ndarray) -> np.ndarray:
-                return machine.ode_rhs(t, y, Mc_func, source_emf_with_faults)
+                return machine.ode_rhs(t, y, Mc_func, source_emf)
 
-        # 5. Логирование
+        # 5. Logging
         print("\n")
         print(f"  {scenario.name()}")
-        print(f"  Модель: {machine.__class__.__name__}")
-        print(f"  Солвер: {self._solver.describe()}")
-        print(f"  Источник: {source.describe()}")
-        print(f"  Нагрузка: {load.describe()}")
-        if faults:
-            for f in faults:
-                print(f"  Неисправность: {f.describe()}")
-        print(f"  t = [{t_span[0]:.2f}, {t_span[1]:.2f}] с")
+        print(f"  Model: {machine.__class__.__name__}")
+        print(f"  Solver: {self._solver.describe()}")
+        print(f"  Source: {source.describe()}")
+        print(f"  Load: {load.describe()}")
+        print(f"  t = [{t_span[0]:.2f}, {t_span[1]:.2f}] s")
         print("\n")
 
-        # 6. Решить
+        # 6. Solve
         t, y, success, message = self._solver.solve(rhs, y0, t_span)
 
         if not success:
-            raise RuntimeError(f"Решатель не сошёлся: {message}")
+            raise RuntimeError(f"Solver failed: {message}")
 
-        print(f"  Решение получено. Точек: {len(t)}")
+        print(f"  Solution obtained. Points: {len(t)}")
 
-        # 7. Собрать результаты
+        # 7. Build result container
         results = SimulationResults.from_solver_output(
-            t=t, y=y, params=params,
+            t=t,
+            y=y,
+            params=params,
             scenario_name=scenario.name(),
             solver_name=self._solver.describe(),
         )
 
-        # 8. Пост-обработка (вычисление derived quantities)
+        # 8. Post-process derived values
         self._post_process(
             results,
             machine,
             source,
             load=load,
-            faults=faults,
             r_src=r_src,
             l_src=l_src,
         )
@@ -205,7 +182,6 @@ class SimulationBuilder:
 
         return results
 
-
     # Post-processing
     @staticmethod
     def _post_process(
@@ -213,14 +189,12 @@ class SimulationBuilder:
         machine: MachineModel,
         source,
         load=None,
-        faults: Optional[List[Fault]] = None,
         r_src: float = 0.0,
         l_src: float = 0.0,
-    ):
-        """Вычислить производные величины (момент, модули, мощности, etc.)"""
+    ) -> None:
+        """Compute derived values (torque, modules, powers, etc.)"""
         N = res.N
         params = res.params
-        faults = faults or []
 
         res.Mem = np.zeros(N)
         res.Mc = np.zeros(N)
@@ -248,7 +222,6 @@ class SimulationBuilder:
             di1B_dt = np.zeros(N)
             di1C_dt = np.zeros(N)
 
-        # Если модель поддерживает compute_terminal_voltages — делегируем ей
         has_custom_voltage = hasattr(machine, "compute_terminal_voltages")
 
         for k in range(N):
@@ -261,7 +234,6 @@ class SimulationBuilder:
             res.I1_mod[k] = machine.result_current_module(i1A, i1B, i1C)
             res.I2_mod[k] = machine.result_current_module(i2a, i2b, i2c)
 
-            # Клеммные напряжения
             if has_custom_voltage:
                 E_raw = source(res.t[k])
                 y_stator = np.array([i1A, i1B, i1C])
@@ -271,8 +243,6 @@ class SimulationBuilder:
                 )
             else:
                 Us = source(res.t[k])
-                for fault in faults:
-                    Us = fault.modify_voltages(res.t[k], Us)
                 if abs(r_src) > 0.0 or abs(l_src) > 0.0:
                     Us = np.array([
                         Us[0] - r_src * i1A - l_src * di1A_dt[k],
@@ -301,8 +271,8 @@ class SimulationBuilder:
     @staticmethod
     def _source_impedance(source) -> tuple[float, float]:
         """
-        Вернуть последовательный импеданс источника (на фазу).
-        Для идеального источника: (0, 0).
+        Return per-phase series source impedance.
+        For ideal source: (0, 0).
         """
         r_src = float(getattr(source, "r_series", 0.0))
         l_src = float(getattr(source, "l_series", 0.0))

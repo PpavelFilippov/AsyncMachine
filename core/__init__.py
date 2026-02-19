@@ -1,7 +1,6 @@
 ﻿from .parameters import MachineParameters
-from .state import StateView, make_initial_state, STATE_SIZE
 from .results import SimulationResults
-from .multi_results import MultiMachineResults
+from .state import STATE_SIZE, StateView, make_initial_state
 
 __all__ = [
     "MachineParameters",
@@ -9,5 +8,4 @@ __all__ = [
     "make_initial_state",
     "STATE_SIZE",
     "SimulationResults",
-    "MultiMachineResults",
 ]
