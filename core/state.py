@@ -62,3 +62,22 @@ def make_initial_state(omega_r: float = 0.0) -> np.ndarray:
     y0 = np.zeros(STATE_SIZE)
     y0[OMEGA_R] = omega_r
     return y0
+
+
+def extend_state_for_fault(y_normal: np.ndarray, n_extra: int) -> np.ndarray:
+    """
+    Расширить вектор состояния для режима КЗ.
+
+    Добавляет n_extra нулевых элементов (начальные токи КЗ = 0)
+    в конец вектора состояния.
+
+    Args:
+        y_normal: базовый вектор состояния [7]
+        n_extra:  количество дополнительных переменных (токов КЗ)
+
+    Returns:
+        y_ext: расширенный вектор [7 + n_extra]
+    """
+    y_ext = np.zeros(STATE_SIZE + n_extra, dtype=float)
+    y_ext[0:STATE_SIZE] = y_normal
+    return y_ext
