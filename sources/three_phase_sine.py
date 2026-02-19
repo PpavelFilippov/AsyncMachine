@@ -34,6 +34,9 @@ class ThreePhaseSineSource(VoltageSource):
             self.amplitude * np.sin(wt + 2 * np.pi / 3),
         ])
 
+    def electrical_frequency_hz(self) -> float | None:
+        return float(self.frequency)
+
     def describe(self) -> str:
         return (
             f"3-фазная синусоида: Um={self.amplitude:.1f} В, "

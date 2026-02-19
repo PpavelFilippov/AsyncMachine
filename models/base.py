@@ -19,14 +19,42 @@ class MachineModel(ABC):
     Базовый класс модели асинхронной машины.
 
     Контракт:
-      - ode_rhs(t, y, Mc_func, U_func)    -> dydt            - правая часть ОДУ
-      - electromagnetic_torque(y)         -> float           - момент по вектору состояния
+      - electrical_matrices(t, y)         -> (L, b0)         - эл. подсистема без источника
+      - mechanical_rhs(t, y, Mc)          -> domega_dt       - мех. уравнение
+      - ode_rhs(t, y, Mc_func, U_func)    -> dydt            - совместимость
+      - electromagnetic_torque(y)         -> float           - момент по токам
       - result_current_module(iA, iB, iC) -> float           - модуль тока
       - flux_linkage_phaseA(y)            -> float           - потокосцепление фазы A
     """
 
     def __init__(self, params: MachineParameters):
         self.params = params
+
+    @abstractmethod
+    def electrical_matrices(
+        self,
+        t: float,
+        y: np.ndarray,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """
+        Электрическая часть модели в виде:
+            L(y, t) * di/dt = b0(y, t) + [UsA, UsB, UsC, 0, 0, 0]
+
+        где:
+            L  - матрица [6x6]
+            b0 - вектор [6], не включает напряжение источника статора.
+        """
+        ...
+
+    @abstractmethod
+    def mechanical_rhs(
+        self,
+        t: float,
+        y: np.ndarray,
+        Mc: float,
+    ) -> float:
+        """Правая часть механического уравнения d(omega_r)/dt"""
+        ...
 
     @abstractmethod
     def ode_rhs(

@@ -84,8 +84,9 @@ class SimulationBuilder:
         source = scenario.voltage_source(params)
         load = scenario.load_torque(params)
         t_span = scenario.t_span()
-        r_src, l_src = self._source_impedance(source)
-        source_is_nonideal = abs(r_src) > 0.0 or abs(l_src) > 0.0
+        r_src_mat, l_src_mat = self._source_series_matrices(source)
+        l_src_embed = np.zeros((6, 6), dtype=float)
+        l_src_embed[0:3, 0:3] = l_src_mat
 
         # 3. Source and load callbacks
         def source_emf(t: float) -> np.ndarray:
@@ -94,51 +95,42 @@ class SimulationBuilder:
         def Mc_func(t: float, omega_r: float) -> float:
             return load(t, omega_r)
 
-        # 4. ODE right-hand side
-        if source_is_nonideal:
-            if not hasattr(machine, "_L_matrix") or not hasattr(machine, "_rotor_emf"):
-                raise NotImplementedError(
-                    "Non-ideal source is supported only for models "
-                    "with _L_matrix and _rotor_emf (e.g. LinearInductionMachine)."
+        # 4. ODE right-hand side (single modular path for any source model)
+        def rhs(t: float, y: np.ndarray) -> np.ndarray:
+            L_machine, b0_machine = machine.electrical_matrices(t, y)
+            L_machine = np.asarray(L_machine, dtype=float)
+            b0_machine = np.asarray(b0_machine, dtype=float)
+            if L_machine.shape != (6, 6):
+                raise ValueError(
+                    f"{machine.__class__.__name__}.electrical_matrices returned "
+                    f"L with shape {L_machine.shape}, expected (6, 6)."
+                )
+            if b0_machine.shape != (6,):
+                raise ValueError(
+                    f"{machine.__class__.__name__}.electrical_matrices returned "
+                    f"b0 with shape {b0_machine.shape}, expected (6,)."
                 )
 
-            L_eff = machine._L_matrix.copy()
-            for ph in range(3):
-                L_eff[ph, ph] += l_src
-            L_eff_inv = np.linalg.inv(L_eff)
+            E_src = np.asarray(source_emf(t), dtype=float)
+            if E_src.shape != (3,):
+                raise ValueError(
+                    f"{source.__class__.__name__} returned source vector with shape "
+                    f"{E_src.shape}, expected (3,)."
+                )
 
-            def rhs(t: float, y: np.ndarray) -> np.ndarray:
-                i1A, i1B, i1C = y[0], y[1], y[2]
-                i2a, i2b, i2c = y[3], y[4], y[5]
-                omega_r = y[6]
+            i_stator = y[0:3]
+            lhs = L_machine + l_src_embed
+            rhs_e = b0_machine.copy()
+            rhs_e[0:3] += E_src - r_src_mat @ i_stator
+            di_dt = np.linalg.solve(lhs, rhs_e)
 
-                imA = i1A + i2a
-                imB = i1B + i2b
-                imC = i1C + i2c
-                E_rot = machine._rotor_emf(i2a, i2b, i2c, imA, imB, imC, omega_r)
+            Mc = Mc_func(t, y[6])
+            domega_dt = machine.mechanical_rhs(t, y, Mc)
 
-                E_src = source_emf(t)
-                b = np.array([
-                    E_src[0] - (machine.R1 + r_src) * i1A,
-                    E_src[1] - (machine.R1 + r_src) * i1B,
-                    E_src[2] - (machine.R1 + r_src) * i1C,
-                    -machine.R2 * i2a - E_rot[0],
-                    -machine.R2 * i2b - E_rot[1],
-                    -machine.R2 * i2c - E_rot[2],
-                ])
-                di_dt = L_eff_inv @ b
-
-                Mem = machine.electromagnetic_torque(i1A, i1B, i1C, i2a, i2b, i2c)
-                Mc = Mc_func(t, omega_r)
-                domega_dt = (Mem - Mc) / machine.J
-
-                dydt = np.empty(7)
-                dydt[0:6] = di_dt
-                dydt[6] = domega_dt
-                return dydt
-        else:
-            def rhs(t: float, y: np.ndarray) -> np.ndarray:
-                return machine.ode_rhs(t, y, Mc_func, source_emf)
+            dydt = np.empty(7)
+            dydt[0:6] = di_dt
+            dydt[6] = domega_dt
+            return dydt
 
         # 5. Logging
         print("\n")
@@ -166,114 +158,33 @@ class SimulationBuilder:
             scenario_name=scenario.name(),
             solver_name=self._solver.describe(),
         )
-
-        # 8. Post-process derived values
-        self._post_process(
-            results,
-            machine,
-            source,
-            load=load,
-            r_src=r_src,
-            l_src=l_src,
-        )
+        # Keep only raw solver output in results. Derived values are computed
+        # on demand from the same model equations when statistics are needed.
+        results.extra["machine"] = machine
+        results.extra["source"] = source
+        results.extra["load"] = load
+        results.extra["rhs"] = rhs
+        results.extra["source_r_matrix"] = r_src_mat.copy()
+        results.extra["source_l_matrix"] = l_src_mat.copy()
 
         print(f"\n{results.summary()}")
         print("\n")
 
         return results
 
-    # Post-processing
     @staticmethod
-    def _post_process(
-        res: SimulationResults,
-        machine: MachineModel,
-        source,
-        load=None,
-        r_src: float = 0.0,
-        l_src: float = 0.0,
-    ) -> None:
-        """Compute derived values (torque, modules, powers, etc.)"""
-        N = res.N
-        params = res.params
-
-        res.Mem = np.zeros(N)
-        res.Mc = np.zeros(N)
-        res.I1_mod = np.zeros(N)
-        res.I2_mod = np.zeros(N)
-        res.Im_mod = np.zeros(N)
-        res.U1A = np.zeros(N)
-        res.U1B = np.zeros(N)
-        res.U1C = np.zeros(N)
-        res.U_mod = np.zeros(N)
-        res.slip = np.zeros(N)
-        res.Psi1A = np.zeros(N)
-        res.imA = np.zeros(N)
-        res.imB = np.zeros(N)
-        res.imC = np.zeros(N)
-
-        omega_sync = params.omega_sync
-        if N >= 2:
-            grad_edge_order = 2 if N >= 3 else 1
-            di1A_dt = np.gradient(res.i1A, res.t, edge_order=grad_edge_order)
-            di1B_dt = np.gradient(res.i1B, res.t, edge_order=grad_edge_order)
-            di1C_dt = np.gradient(res.i1C, res.t, edge_order=grad_edge_order)
-        else:
-            di1A_dt = np.zeros(N)
-            di1B_dt = np.zeros(N)
-            di1C_dt = np.zeros(N)
-
-        has_custom_voltage = hasattr(machine, "compute_terminal_voltages")
-
-        for k in range(N):
-            i1A, i1B, i1C = res.i1A[k], res.i1B[k], res.i1C[k]
-            i2a, i2b, i2c = res.i2a[k], res.i2b[k], res.i2c[k]
-
-            res.Mem[k] = machine.electromagnetic_torque(i1A, i1B, i1C, i2a, i2b, i2c)
-            if load is not None:
-                res.Mc[k] = load(res.t[k], res.omega_r[k])
-            res.I1_mod[k] = machine.result_current_module(i1A, i1B, i1C)
-            res.I2_mod[k] = machine.result_current_module(i2a, i2b, i2c)
-
-            if has_custom_voltage:
-                E_raw = source(res.t[k])
-                y_stator = np.array([i1A, i1B, i1C])
-                di_stator = np.array([di1A_dt[k], di1B_dt[k], di1C_dt[k]])
-                Us = machine.compute_terminal_voltages(
-                    res.t[k], E_raw, y_stator, di_stator,
-                )
-            else:
-                Us = source(res.t[k])
-                if abs(r_src) > 0.0 or abs(l_src) > 0.0:
-                    Us = np.array([
-                        Us[0] - r_src * i1A - l_src * di1A_dt[k],
-                        Us[1] - r_src * i1B - l_src * di1B_dt[k],
-                        Us[2] - r_src * i1C - l_src * di1C_dt[k],
-                    ])
-            res.U1A[k], res.U1B[k], res.U1C[k] = Us[0], Us[1], Us[2]
-            res.U_mod[k] = machine.result_voltage_module(Us[0], Us[1], Us[2])
-
-            if abs(omega_sync) > 1e-10:
-                res.slip[k] = (omega_sync - res.omega_r[k]) / omega_sync
-
-            res.Psi1A[k] = machine.flux_linkage_phaseA(i1A, i1B, i1C, i2a, i2b, i2c)
-
-            res.imA[k] = i1A + i2a
-            res.imB[k] = i1B + i2b
-            res.imC[k] = i1C + i2c
-            res.Im_mod[k] = machine.result_current_module(
-                res.imA[k], res.imB[k], res.imC[k]
+    def _source_series_matrices(source) -> tuple[np.ndarray, np.ndarray]:
+        """Return source series R/L matrices in phase coordinates (3x3)."""
+        R = np.asarray(source.series_resistance_matrix(), dtype=float)
+        L = np.asarray(source.series_inductance_matrix(), dtype=float)
+        if R.shape != (3, 3):
+            raise ValueError(
+                f"{source.__class__.__name__}.series_resistance_matrix returned "
+                f"shape {R.shape}, expected (3, 3)."
             )
-
-        res.n_rpm = res.omega_r * 60 / (2 * np.pi)
-        res.P_elec = res.U1A * res.i1A + res.U1B * res.i1B + res.U1C * res.i1C
-        res.P_mech = res.Mem * res.omega_r
-
-    @staticmethod
-    def _source_impedance(source) -> tuple[float, float]:
-        """
-        Return per-phase series source impedance.
-        For ideal source: (0, 0).
-        """
-        r_src = float(getattr(source, "r_series", 0.0))
-        l_src = float(getattr(source, "l_series", 0.0))
-        return r_src, l_src
+        if L.shape != (3, 3):
+            raise ValueError(
+                f"{source.__class__.__name__}.series_inductance_matrix returned "
+                f"shape {L.shape}, expected (3, 3)."
+            )
+        return R, L

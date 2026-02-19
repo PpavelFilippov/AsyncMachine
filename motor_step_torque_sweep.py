@@ -23,6 +23,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from core.parameters import MachineParameters
+from models.linear import LinearInductionMachine
 from scenarios import MotorStepLoadScenario
 from simulation import SimulationBuilder
 from solvers import ScipySolver, SolverConfig
@@ -68,6 +69,10 @@ def phase_rms(values: np.ndarray) -> float:
     return float(np.sqrt(np.mean(values ** 2)))
 
 
+def current_module(iA: np.ndarray, iB: np.ndarray, iC: np.ndarray) -> np.ndarray:
+    return np.sqrt((iB - iC) ** 2 / 3.0 + iA ** 2)
+
+
 def steady_slice(n_points: int, steady_frac: float) -> slice:
     idx = int(n_points * steady_frac)
     return slice(idx, None)
@@ -96,9 +101,23 @@ def evaluate_torque_point(
 
     ss = steady_slice(len(res.t), steady_frac)
     i1a_ss = res.i1A[ss]
-    i1_mod_ss = res.I1_mod[ss]
-    n_ss = res.n_rpm[ss]
-    mem_ss = res.Mem[ss]
+    i1_mod_ss = current_module(res.i1A[ss], res.i1B[ss], res.i1C[ss])
+    n_ss = res.omega_r[ss] * 60.0 / (2.0 * np.pi)
+
+    machine = res.extra.get("machine")
+    if machine is None:
+        machine = LinearInductionMachine(params)
+    mem_ss = np.fromiter(
+        (
+            machine.electromagnetic_torque(
+                res.i1A[k], res.i1B[k], res.i1C[k],
+                res.i2a[k], res.i2b[k], res.i2c[k],
+            )
+            for k in range(ss.start, len(res.t))
+        ),
+        dtype=float,
+        count=len(res.t) - ss.start,
+    )
 
     i1a_rms = phase_rms(i1a_ss)
     i1a_amp_abs_max = float(np.max(np.abs(i1a_ss)))

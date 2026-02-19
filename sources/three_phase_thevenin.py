@@ -1,8 +1,10 @@
 """
-Неидеальный трёхфазный источник (эквивалент Теvenin).
+Non-ideal three-phase source (Thevenin equivalent).
 
-Модель источника на фазу:
+Per-phase model:
     u_terminal = e_phase(t) - R_s * i_phase - L_s * di_phase/dt
+
+__call__(t) returns internal EMF e(t).
 """
 from __future__ import annotations
 
@@ -12,11 +14,7 @@ from .base import VoltageSource
 
 
 class ThreePhaseSineTheveninSource(VoltageSource):
-    """
-    Трёхфазная синусоидальная ЭДС за последовательным RL-импедансом.
-
-    __call__(t) возвращает внутреннюю ЭДС e(t), а не клеммное напряжение.
-    """
+    """Three-phase sinusoidal EMF with series RL impedance."""
 
     def __init__(
         self,
@@ -41,10 +39,18 @@ class ThreePhaseSineTheveninSource(VoltageSource):
             self.amplitude * np.sin(wt + 2 * np.pi / 3),
         ])
 
+    def series_resistance_matrix(self) -> np.ndarray:
+        return np.eye(3, dtype=float) * float(self.r_series)
+
+    def series_inductance_matrix(self) -> np.ndarray:
+        return np.eye(3, dtype=float) * float(self.l_series)
+
+    def electrical_frequency_hz(self) -> float | None:
+        return float(self.frequency)
+
     def describe(self) -> str:
         return (
-            f"3-фазный Thevenin: Um={self.amplitude:.1f} В, "
-            f"f={self.frequency:.1f} Гц, Rs={self.r_series:.5f} Ом, "
-            f"Ls={self.l_series * 1e3:.5f} мГн"
+            f"3-phase Thevenin: Um={self.amplitude:.1f} V, "
+            f"f={self.frequency:.1f} Hz, Rs={self.r_series:.5f} Ohm, "
+            f"Ls={self.l_series * 1e3:.5f} mH"
         )
-

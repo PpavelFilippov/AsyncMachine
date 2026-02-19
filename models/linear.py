@@ -41,7 +41,6 @@ class LinearInductionMachine(MachineModel):
 
         # Матрица индуктивностей постоянна для линейной модели → кэшируем
         self._L_matrix = self._build_inductance_matrix()
-        self._L_inv = np.linalg.inv(self._L_matrix)
 
     # ------------------------------------------------------------------
     # Внутренние расчёты
@@ -126,6 +125,45 @@ class LinearInductionMachine(MachineModel):
             + Mm * (i2a - (i2b + i2c) / 2.0)
         )
 
+    def electrical_matrices(
+        self,
+        t: float,
+        y: np.ndarray,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """
+        Электрическая подсистема (без напряжения статора источника):
+            L * di/dt = b0 + [UsA, UsB, UsC, 0, 0, 0]
+        """
+        i1A, i1B, i1C = y[0], y[1], y[2]
+        i2a, i2b, i2c = y[3], y[4], y[5]
+        omega_r = y[6]
+
+        imA = i1A + i2a
+        imB = i1B + i2b
+        imC = i1C + i2c
+        E_rot = self._rotor_emf(i2a, i2b, i2c, imA, imB, imC, omega_r)
+
+        b0 = np.array([
+            -self.R1 * i1A,
+            -self.R1 * i1B,
+            -self.R1 * i1C,
+            -self.R2 * i2a - E_rot[0],
+            -self.R2 * i2b - E_rot[1],
+            -self.R2 * i2c - E_rot[2],
+        ])
+        return self._L_matrix, b0
+
+    def mechanical_rhs(
+        self,
+        t: float,
+        y: np.ndarray,
+        Mc: float,
+    ) -> float:
+        i1A, i1B, i1C = y[0], y[1], y[2]
+        i2a, i2b, i2c = y[3], y[4], y[5]
+        Mem = self.electromagnetic_torque(i1A, i1B, i1C, i2a, i2b, i2c)
+        return (Mem - Mc) / self.J
+
     def ode_rhs(
         self,
         t: float,
@@ -138,38 +176,14 @@ class LinearInductionMachine(MachineModel):
             [L]*[di/dt] = [U] − [R*i] − [E_rot]
             J*d(omega)/dt = Mэм − Mc
         """
-        i1A, i1B, i1C = y[0], y[1], y[2]
-        i2a, i2b, i2c = y[3], y[4], y[5]
-        omega_r = y[6]
-
-        # Токи намагничивания
-        imA = i1A + i2a
-        imB = i1B + i2b
-        imC = i1C + i2c
-
-        # Напряжения статора
         Us = U_func(t)
+        L, b0 = self.electrical_matrices(t, y)
+        b = b0.copy()
+        b[0:3] += Us
+        di_dt = np.linalg.solve(L, b)
 
-        # Короткозамкнутый ротор: Ur = 0
-        E_rot = self._rotor_emf(i2a, i2b, i2c, imA, imB, imC, omega_r)
-
-        # Правая часть электрических уравнений
-        b = np.array([
-            Us[0] - self.R1 * i1A,
-            Us[1] - self.R1 * i1B,
-            Us[2] - self.R1 * i1C,
-            -self.R2 * i2a - E_rot[0],
-            -self.R2 * i2b - E_rot[1],
-            -self.R2 * i2c - E_rot[2],
-        ])
-
-        # di/dt = invL * b  (L постоянна -> используем кэш)
-        di_dt = self._L_inv @ b
-
-        # Механическое уравнение
-        Mem = self.electromagnetic_torque(i1A, i1B, i1C, i2a, i2b, i2c)
-        Mc = Mc_func(t, omega_r)
-        domega_dt = (Mem - Mc) / self.J
+        Mc = Mc_func(t, y[6])
+        domega_dt = self.mechanical_rhs(t, y, Mc)
 
         dydt = np.empty(7)
         dydt[0:6] = di_dt
