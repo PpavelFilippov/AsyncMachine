@@ -24,6 +24,7 @@ class FaultType(Enum):
     """Тип физического воздействия неисправности"""
     OPEN_CIRCUIT = auto()    # Обрыв: i_phase = 0 (разрыв цепи)
     GROUND_FAULT = auto()    # Замыкание на землю: U_phase = 0 (ток свободен)
+    INTER_PHASE_SC = auto()  # Межфазное КЗ: U_faulted = U_f (общий потенциал)
 
 
 class Fault(ABC):

@@ -248,6 +248,9 @@ class SimulationBuilder:
             di1B_dt = np.zeros(N)
             di1C_dt = np.zeros(N)
 
+        # Если модель поддерживает compute_terminal_voltages — делегируем ей
+        has_custom_voltage = hasattr(machine, "compute_terminal_voltages")
+
         for k in range(N):
             i1A, i1B, i1C = res.i1A[k], res.i1B[k], res.i1C[k]
             i2a, i2b, i2c = res.i2a[k], res.i2b[k], res.i2c[k]
@@ -258,15 +261,24 @@ class SimulationBuilder:
             res.I1_mod[k] = machine.result_current_module(i1A, i1B, i1C)
             res.I2_mod[k] = machine.result_current_module(i2a, i2b, i2c)
 
-            Us = source(res.t[k])
-            for fault in faults:
-                Us = fault.modify_voltages(res.t[k], Us)
-            if abs(r_src) > 0.0 or abs(l_src) > 0.0:
-                Us = np.array([
-                    Us[0] - r_src * i1A - l_src * di1A_dt[k],
-                    Us[1] - r_src * i1B - l_src * di1B_dt[k],
-                    Us[2] - r_src * i1C - l_src * di1C_dt[k],
-                ])
+            # Клеммные напряжения
+            if has_custom_voltage:
+                E_raw = source(res.t[k])
+                y_stator = np.array([i1A, i1B, i1C])
+                di_stator = np.array([di1A_dt[k], di1B_dt[k], di1C_dt[k]])
+                Us = machine.compute_terminal_voltages(
+                    res.t[k], E_raw, y_stator, di_stator,
+                )
+            else:
+                Us = source(res.t[k])
+                for fault in faults:
+                    Us = fault.modify_voltages(res.t[k], Us)
+                if abs(r_src) > 0.0 or abs(l_src) > 0.0:
+                    Us = np.array([
+                        Us[0] - r_src * i1A - l_src * di1A_dt[k],
+                        Us[1] - r_src * i1B - l_src * di1B_dt[k],
+                        Us[2] - r_src * i1C - l_src * di1C_dt[k],
+                    ])
             res.U1A[k], res.U1B[k], res.U1C[k] = Us[0], Us[1], Us[2]
             res.U_mod[k] = machine.result_voltage_module(Us[0], Us[1], Us[2])
 
