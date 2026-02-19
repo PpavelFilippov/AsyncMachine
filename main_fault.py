@@ -36,7 +36,7 @@ from sources.three_phase_thevenin import ThreePhaseSineTheveninSource
 # ======================================================================
 
 class MotorNoLoadThevenin(MotorNoLoadScenario):
-    """Холостой ход с Thevenin-источником."""
+    """Холостой ход с Thevenin-источником и мех. потерями."""
 
     def __init__(self, t_end: float = 4.0, Mc_idle: float = 0.0,
                  r_series: float = 0.02, l_series: float = 2e-4):
@@ -52,7 +52,6 @@ class MotorNoLoadThevenin(MotorNoLoadScenario):
 
 
 class MotorStepLoadThevenin(MotorStepLoadScenario):
-    """Наброс нагрузки с Thevenin-источником."""
 
     def __init__(self, t_end: float = 4.0, t_step: float = 2.0,
                  Mc_load: float | None = None, Mc_idle: float = 0.0,
@@ -67,7 +66,6 @@ class MotorStepLoadThevenin(MotorStepLoadScenario):
             amplitude=params.Um, frequency=params.fn,
             r_series=self._r_series, l_series=self._l_series,
         )
-
 
 # ======================================================================
 # Графики для режимов КЗ
@@ -89,7 +87,7 @@ def plot_fault_results(
 
     # Расчёт производных величин
     n_rpm = res.omega_r * 60.0 / (2.0 * np.pi)
-    i1_mod = np.sqrt((res.i1B - res.i1C) ** 2 / 3.0 + res.i1A ** 2)
+    u1A, u1B, u1C = _compute_stator_phase_voltages(res)
 
     mem = np.fromiter(
         (
@@ -119,12 +117,14 @@ def plot_fault_results(
                     title="Фазные токи статора")
     axes[0, 0].legend(fontsize=8)
 
-    # --- Row 0: Модуль тока статора ---
-    axes[0, 1].plot(t, i1_mod, "b-", lw=0.6)
+    # --- Row 0: Фазные напряжения статора ---
+    axes[0, 1].plot(t, u1A, "b-", lw=0.5, label="U1A")
+    axes[0, 1].plot(t, u1B, "r-", lw=0.5, label="U1B")
+    axes[0, 1].plot(t, u1C, "g-", lw=0.5, label="U1C")
     axes[0, 1].axvline(x=t_fault, color="k", lw=1.2, ls="--",
                         label=f"t_fault={t_fault:.2f}")
-    axes[0, 1].set(xlabel="Время, с", ylabel="|I1|, А",
-                    title="Модуль результирующего тока статора")
+    axes[0, 1].set(xlabel="Время, с", ylabel="Напряжение, В",
+                    title="Фазные напряжения статора")
     axes[0, 1].legend(fontsize=8)
 
     # --- Row 1: Электромагнитный момент ---
@@ -197,6 +197,114 @@ def plot_fault_results(
     return fig
 
 
+def plot_stator_phase_iv_6(
+    res: SimulationResults,
+    save_path: str | None = None,
+) -> plt.Figure:
+    """
+    Отдельный график 3x2:
+      - слева фазные токи статора i1A/i1B/i1C,
+      - справа соответствующие фазные напряжения U1A/U1B/U1C.
+    """
+    t = res.t
+    t_fault = float(res.extra.get("t_fault", t[-1]))
+    u1A, u1B, u1C = _compute_stator_phase_voltages(res)
+
+    fig, axes = plt.subplots(3, 2, figsize=(16, 12), sharex=True)
+    fig.suptitle(
+        f"Фазные токи и напряжения статора (3x2)\n({res.scenario_name})",
+        fontsize=13,
+        fontweight="bold",
+    )
+
+    phase_data = [
+        ("A", res.i1A, u1A, "b"),
+        ("B", res.i1B, u1B, "r"),
+        ("C", res.i1C, u1C, "g"),
+    ]
+
+    for row, (ph, i_ph, u_ph, color) in enumerate(phase_data):
+        ax_i = axes[row, 0]
+        ax_u = axes[row, 1]
+
+        ax_i.plot(t, i_ph, color=color, lw=0.7, label=f"i1{ph}")
+        ax_u.plot(t, u_ph, color=color, lw=0.7, label=f"U1{ph}")
+
+        ax_i.axvline(x=t_fault, color="k", lw=1.0, ls="--",
+                     label=f"t_fault={t_fault:.2f}")
+        ax_u.axvline(x=t_fault, color="k", lw=1.0, ls="--",
+                     label=f"t_fault={t_fault:.2f}")
+
+        ax_i.set_ylabel("Ток, А")
+        ax_u.set_ylabel("Напряжение, В")
+        ax_i.set_title(f"Фаза {ph}: ток статора i1{ph}")
+        ax_u.set_title(f"Фаза {ph}: напряжение статора U1{ph}")
+        ax_i.legend(fontsize=8, loc="upper right")
+        ax_u.legend(fontsize=8, loc="upper right")
+
+    axes[2, 0].set_xlabel("Время, с")
+    axes[2, 1].set_xlabel("Время, с")
+    plt.tight_layout(rect=[0, 0, 1, 0.95])
+
+    if save_path:
+        fig.savefig(save_path, dpi=200, bbox_inches="tight")
+        print(f"  Сохранено: {save_path}")
+    plt.close(fig)
+    return fig
+
+
+def _compute_stator_phase_voltages(
+    res: SimulationResults,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Reconstruct stator terminal phase voltages for fault simulation results.
+
+    For pre-fault part uses rhs_normal and zero fault currents.
+    For post-fault part uses rhs_fault and model-consistent source current
+    (i_source = i_stator + D^T * i_fault).
+    """
+    source = res.extra["source"]
+    rhs_normal = res.extra["rhs_normal"]
+    rhs_fault = res.extra["rhs_fault"]
+    machine_sc = res.extra["machine_sc"]
+    i_fault = res.extra["i_fault"]
+    n_seg1 = int(res.extra["N_segment1"])
+    n_extra = i_fault.shape[0]
+
+    uA = np.zeros(res.N, dtype=float)
+    uB = np.zeros(res.N, dtype=float)
+    uC = np.zeros(res.N, dtype=float)
+
+    for k in range(res.N):
+        t_k = float(res.t[k])
+        y_base = np.array(
+            [
+                res.i1A[k], res.i1B[k], res.i1C[k],
+                res.i2a[k], res.i2b[k], res.i2c[k],
+                res.omega_r[k],
+            ],
+            dtype=float,
+        )
+        E_src = np.asarray(source(t_k), dtype=float)
+
+        if k < n_seg1:
+            d_base = np.asarray(rhs_normal(t_k, y_base), dtype=float)
+            di_st = d_base[0:3]
+            i_f = np.zeros(n_extra, dtype=float)
+            di_f = np.zeros(n_extra, dtype=float)
+        else:
+            i_f = np.asarray(i_fault[:, k], dtype=float)
+            y_ext = np.concatenate([y_base, i_f])
+            d_ext = np.asarray(rhs_fault(t_k, y_ext), dtype=float)
+            di_st = d_ext[0:3]
+            di_f = d_ext[7:]
+
+        u = machine_sc.terminal_voltage(E_src, y_base[0:3], i_f, di_st, di_f)
+        uA[k], uB[k], uC[k] = float(u[0]), float(u[1]), float(u[2])
+
+    return uA, uB, uC
+
+
 # ======================================================================
 # Основной скрипт
 # ======================================================================
@@ -248,6 +356,8 @@ def main() -> None:
     )
     plot_fault_results(res1, save_path=os.path.join(
         output_dir, "fault_no_load_phase_A_ground.png"))
+    plot_stator_phase_iv_6(res1, save_path=os.path.join(
+        output_dir, "fault_no_load_phase_A_ground_stator_iv_6.png"))
 
     # ==================================================================
     # 2) motor_no_load + КЗ фаз A-B без земли
@@ -271,6 +381,8 @@ def main() -> None:
     )
     plot_fault_results(res2, save_path=os.path.join(
         output_dir, "fault_no_load_phase_AB.png"))
+    plot_stator_phase_iv_6(res2, save_path=os.path.join(
+        output_dir, "fault_no_load_phase_AB_stator_iv_6.png"))
 
     # ==================================================================
     # 3) motor_step + КЗ фазы A на землю (КЗ после step)
@@ -297,6 +409,8 @@ def main() -> None:
     )
     plot_fault_results(res3, save_path=os.path.join(
         output_dir, "fault_step_phase_A_ground.png"))
+    plot_stator_phase_iv_6(res3, save_path=os.path.join(
+        output_dir, "fault_step_phase_A_ground_stator_iv_6.png"))
 
     # ==================================================================
     # 4) motor_step + КЗ фаз A-B без земли (КЗ после step)
@@ -320,6 +434,8 @@ def main() -> None:
     )
     plot_fault_results(res4, save_path=os.path.join(
         output_dir, "fault_step_phase_AB.png"))
+    plot_stator_phase_iv_6(res4, save_path=os.path.join(
+        output_dir, "fault_step_phase_AB_stator_iv_6.png"))
 
     # ==================================================================
     # Итог

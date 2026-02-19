@@ -2,7 +2,6 @@
 Типовые нагрузочные характеристики.
 """
 from __future__ import annotations
-
 from .base import LoadTorque
 
 
