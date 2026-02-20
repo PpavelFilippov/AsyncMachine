@@ -159,11 +159,11 @@ class LinearInductionMachineSC:
         # Блок связи: -L_src * D_embed^T  [6 x n_x]
         # Для каждого контура j: столбец = -l_src @ D[j, :]  (только стат. часть)
         coupling_col = np.zeros((6, n_x), dtype=float)
-        coupling_col[0:3, :] = (l_src @ D.T)  # [3 x n_x] ##TODO: was "-", now "+"
+        coupling_col[0:3, :] = (l_src @ D.T)  # [3 x n_x] ##TODO:
 
         # Блок связи: -L_src * D_embed  [n_x x 6]
         coupling_row = np.zeros((n_x, 6), dtype=float)
-        coupling_row[:, 0:3] = (D @ l_src)    # [n_x x 3]  ##TODO: was "-", now "+"
+        coupling_row[:, 0:3] = (D @ l_src)    # [n_x x 3]  ##TODO:
 
         # Диагональный блок контуров КЗ: L_src * D * D^T  [n_x x n_x]
         L_ff = D @ l_src @ D.T
