@@ -4,7 +4,12 @@
       "Bash(python:*)",
       "Bash(.venvScriptspython.exe test_nonlinear.py)",
       "Bash('C:\\\\Users\\\\Пользователь\\\\PycharmProjects\\\\asynchronousMachine\\\\.venv\\\\Scripts\\\\python.exe' test_nonlinear.py)",
-      "Bash(PYTHONIOENCODING=utf-8 'C:\\\\Users\\\\Пользователь\\\\PycharmProjects\\\\asynchronousMachine\\\\.venv\\\\Scripts\\\\python.exe':*)"
+      "Bash(PYTHONIOENCODING=utf-8 'C:\\\\Users\\\\Пользователь\\\\PycharmProjects\\\\asynchronousMachine\\\\.venv\\\\Scripts\\\\python.exe':*)",
+      "Bash(where python)",
+      "Bash(dir:*)",
+      "Bash(ls:*)",
+      "Bash(.venv/Scripts/python.exe:*)",
+      "Bash(PYTHONIOENCODING=utf-8 .venv/Scripts/python.exe:*)"
     ]
   }
 }

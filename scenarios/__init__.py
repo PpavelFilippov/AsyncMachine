@@ -1,4 +1,4 @@
-﻿from .base import Scenario
+from .base import Scenario
 from .motor_start import MotorStartScenario
 from .motor_steady import MotorSteadyScenario
 from .generator_steady import GeneratorSteadyScenario

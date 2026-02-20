@@ -1,0 +1,439 @@
+"""
+    Модуль main_fault.py.
+    Состав:
+    Классы: MotorNoLoadThevenin, MotorStepLoadThevenin.
+    Функции: plot_fault_results, plot_stator_phase_iv_6, main.
+"""
+
+from __future__ import annotations
+
+import os
+import sys
+
+import numpy as np
+import matplotlib
+import matplotlib.pyplot as plt
+
+matplotlib.rcParams["font.size"] = 9
+matplotlib.rcParams["axes.grid"] = True
+matplotlib.rcParams["figure.dpi"] = 150
+
+from core.parameters import MachineParameters
+from core.results import SimulationResults
+from faults.descriptors import phase_to_phase_fault, phase_to_ground_fault
+from models.linear import LinearInductionMachine
+from scenarios.motor_no_load import MotorNoLoadScenario
+from scenarios.motor_step_load import MotorStepLoadScenario
+from simulation_fault import FaultSimulationBuilder
+from solvers import ScipySolver, SolverConfig
+from sources.three_phase_thevenin import ThreePhaseSineTheveninSource
+
+
+class MotorNoLoadThevenin(MotorNoLoadScenario):
+    """
+        Поля:
+        Явные поля уровня класса отсутствуют.
+        Методы:
+        Основные публичные методы: voltage_source.
+    """
+
+    def __init__(self, t_end: float = 4.0, Mc_idle: float = 0.0,
+                 Mc_friction: float = 50.0,
+                 r_series: float = 0.02, l_series: float = 2e-4):
+        """Создает объект и сохраняет параметры для последующих вычислений."""
+
+        super().__init__(t_end=t_end, Mc_idle=Mc_idle, Mc_friction=Mc_friction)
+        self._r_series = r_series
+        self._l_series = l_series
+
+    def voltage_source(self, params):
+        """Формирует источник напряжения для сценария."""
+        return ThreePhaseSineTheveninSource(
+            amplitude=params.Um, frequency=params.fn,
+            r_series=self._r_series, l_series=self._l_series,
+        )
+
+
+class MotorStepLoadThevenin(MotorStepLoadScenario):
+    """
+        Поля:
+        Явные поля уровня класса отсутствуют.
+        Методы:
+        Основные публичные методы: voltage_source.
+    """
+    def __init__(self, t_end: float = 4.0, t_step: float = 2.0,
+                 Mc_load: float | None = None, Mc_idle: float = 0.0,
+                 Mc_friction: float = 50.0,
+                 r_series: float = 0.02, l_series: float = 2e-4):
+        """Создает объект и сохраняет параметры для последующих вычислений."""
+
+        super().__init__(t_end=t_end, t_step=t_step,
+                         Mc_load=Mc_load, Mc_idle=Mc_idle, Mc_friction=Mc_friction)
+        self._r_series = r_series
+        self._l_series = l_series
+
+    def voltage_source(self, params):
+        """Формирует источник напряжения для сценария."""
+        return ThreePhaseSineTheveninSource(
+            amplitude=params.Um, frequency=params.fn,
+            r_series=self._r_series, l_series=self._l_series,
+        )
+
+
+def plot_fault_results(
+    res: SimulationResults,
+    save_path: str | None = None,
+) -> plt.Figure:
+    """Строит графики по данным моделирования."""
+
+    t = res.t
+    params = res.params
+    t_fault = res.extra["t_fault"]
+    i_fault = res.extra["i_fault"]                     
+    n_extra = i_fault.shape[0]
+
+    machine = res.extra["machine"]
+    load = res.extra.get("load")
+                                
+    n_rpm = res.omega_r * 60.0 / (2.0 * np.pi)
+    u1A, u1B, u1C = _compute_stator_phase_voltages(res)
+
+    mem = np.fromiter(
+        (
+            machine.electromagnetic_torque(
+                res.i1A[k], res.i1B[k], res.i1C[k],
+                res.i2a[k], res.i2b[k], res.i2c[k],
+            )
+            for k in range(res.N)
+        ),
+        dtype=float, count=res.N,
+    )
+
+    n_rows = 3 + n_extra
+    fig, axes = plt.subplots(n_rows, 2, figsize=(16, 4 * n_rows))
+    fig.suptitle(
+        f"Результаты моделирования КЗ\n({res.scenario_name})",
+        fontsize=13, fontweight="bold",
+    )
+
+                                        
+    axes[0, 0].plot(t, res.i1A, "b-", lw=0.5, label="i1A")
+    axes[0, 0].plot(t, res.i1B, "r-", lw=0.5, label="i1B")
+    axes[0, 0].plot(t, res.i1C, "g-", lw=0.5, label="i1C")
+    axes[0, 0].axvline(x=t_fault, color="k", lw=1.2, ls="--",
+                        label=f"t_fault={t_fault:.2f}")
+    axes[0, 0].set(xlabel="Время, с", ylabel="Ток, А",
+                    title="Фазные токи статора")
+    axes[0, 0].legend(fontsize=8)
+
+                                              
+    axes[0, 1].plot(t, u1A, "b-", lw=0.5, label="U1A")
+    axes[0, 1].plot(t, u1B, "r-", lw=0.5, label="U1B")
+    axes[0, 1].plot(t, u1C, "g-", lw=0.5, label="U1C")
+    axes[0, 1].axvline(x=t_fault, color="k", lw=1.2, ls="--",
+                        label=f"t_fault={t_fault:.2f}")
+    axes[0, 1].set(xlabel="Время, с", ylabel="Напряжение, В",
+                    title="Фазные напряжения статора")
+    axes[0, 1].legend(fontsize=8)
+
+                                            
+    axes[1, 0].plot(t, mem, "b-", lw=0.5)
+    axes[1, 0].axhline(y=0, color="k", lw=0.5, ls="--")
+    axes[1, 0].axvline(x=t_fault, color="k", lw=1.2, ls="--")
+    if load is not None:
+        mc = np.fromiter(
+            (load(t[k], res.omega_r[k]) for k in range(res.N)),
+            dtype=float, count=res.N,
+        )
+        axes[1, 0].plot(t, mc, "r--", lw=0.8, label="Mc")
+        axes[1, 0].legend(fontsize=8)
+    axes[1, 0].set(xlabel="Время, с", ylabel="Момент, Нм",
+                    title="Электромагнитный момент")
+
+                             
+    axes[1, 1].plot(t, n_rpm, "b-", lw=0.8)
+    omega_sync = params.omega_sync
+    n_sync = omega_sync * 60.0 / (2.0 * np.pi)
+    axes[1, 1].axhline(y=n_sync, color="r", lw=0.8, ls="--",
+                        label=f"n0={n_sync:.0f}")
+    axes[1, 1].axvline(x=t_fault, color="k", lw=1.2, ls="--")
+    axes[1, 1].set(xlabel="Время, с", ylabel="Скорость, об/мин",
+                    title="Частота вращения ротора")
+    axes[1, 1].legend(fontsize=8)
+
+                                       
+    axes[2, 0].plot(t, res.i2a, "b-", lw=0.5, label="i2a")
+    axes[2, 0].plot(t, res.i2b, "r-", lw=0.5, label="i2b")
+    axes[2, 0].plot(t, res.i2c, "g-", lw=0.5, label="i2c")
+    axes[2, 0].axvline(x=t_fault, color="k", lw=1.2, ls="--")
+    axes[2, 0].set(xlabel="Время, с", ylabel="Ток, А",
+                    title="Фазные токи ротора")
+    axes[2, 0].legend(fontsize=8)
+
+                               
+    if abs(omega_sync) > 1e-10:
+        slip = (omega_sync - res.omega_r) / omega_sync
+        axes[2, 1].plot(t, slip, "b-", lw=0.6)
+        axes[2, 1].axhline(y=0, color="r", lw=0.8, ls="--")
+        axes[2, 1].axvline(x=t_fault, color="k", lw=1.2, ls="--")
+    axes[2, 1].set(xlabel="Время, с", ylabel="Скольжение s",
+                    title="Скольжение s(t)")
+
+                              
+    for j in range(n_extra):
+        row = 3 + j
+        axes[row, 0].plot(t, i_fault[j], "m-", lw=0.7)
+        axes[row, 0].axvline(x=t_fault, color="k", lw=1.2, ls="--")
+        axes[row, 0].axhline(y=0, color="k", lw=0.5, ls="--")
+        axes[row, 0].set(xlabel="Время, с", ylabel="Ток КЗ, А",
+                          title=f"Ток короткого замыкания i_f{j+1}")
+
+                             
+        R_f_jj = res.extra["fault"].R_fault_2d[j, j]
+        p_fault_j = R_f_jj * i_fault[j] ** 2
+        axes[row, 1].plot(t, p_fault_j / 1e3, "r-", lw=0.7)
+        axes[row, 1].axvline(x=t_fault, color="k", lw=1.2, ls="--")
+        axes[row, 1].axhline(y=0, color="k", lw=0.5, ls="--")
+        axes[row, 1].set(xlabel="Время, с", ylabel="Мощность, кВт",
+                          title=f"Мощность на R_fault[{j+1}] = {R_f_jj:.4g} Ом")
+
+    plt.tight_layout(rect=[0, 0, 1, 0.95])
+
+    if save_path:
+        fig.savefig(save_path, dpi=200, bbox_inches="tight")
+        print(f"  Сохранено: {save_path}")
+    plt.close(fig)
+    return fig
+
+
+def plot_stator_phase_iv_6(
+    res: SimulationResults,
+    save_path: str | None = None,
+) -> plt.Figure:
+    """Строит графики по данным моделирования."""
+
+    t = res.t
+    t_fault = float(res.extra.get("t_fault", t[-1]))
+    u1A, u1B, u1C = _compute_stator_phase_voltages(res)
+
+    fig, axes = plt.subplots(3, 2, figsize=(16, 12), sharex=True)
+    fig.suptitle(
+        f"Фазные токи и напряжения статора (3x2)\n({res.scenario_name})",
+        fontsize=13,
+        fontweight="bold",
+    )
+
+    phase_data = [
+        ("A", res.i1A, u1A, "b"),
+        ("B", res.i1B, u1B, "r"),
+        ("C", res.i1C, u1C, "g"),
+    ]
+
+    for row, (ph, i_ph, u_ph, color) in enumerate(phase_data):
+        ax_i = axes[row, 0]
+        ax_u = axes[row, 1]
+
+        ax_i.plot(t, i_ph, color=color, lw=0.7, label=f"i1{ph}")
+        ax_u.plot(t, u_ph, color=color, lw=0.7, label=f"U1{ph}")
+
+        ax_i.axvline(x=t_fault, color="k", lw=1.0, ls="--",
+                     label=f"t_fault={t_fault:.2f}")
+        ax_u.axvline(x=t_fault, color="k", lw=1.0, ls="--",
+                     label=f"t_fault={t_fault:.2f}")
+
+        ax_i.set_ylabel("Ток, А")
+        ax_u.set_ylabel("Напряжение, В")
+        ax_i.set_title(f"Фаза {ph}: ток статора i1{ph}")
+        ax_u.set_title(f"Фаза {ph}: напряжение статора U1{ph}")
+        ax_i.legend(fontsize=8, loc="upper right")
+        ax_u.legend(fontsize=8, loc="upper right")
+
+    axes[2, 0].set_xlabel("Время, с")
+    axes[2, 1].set_xlabel("Время, с")
+    plt.tight_layout(rect=[0, 0, 1, 0.95])
+
+    if save_path:
+        fig.savefig(save_path, dpi=200, bbox_inches="tight")
+        print(f"  Сохранено: {save_path}")
+    plt.close(fig)
+    return fig
+
+
+def _compute_stator_phase_voltages(
+    res: SimulationResults,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Вычисляет фазные напряжения статора по токам и ЭДС источника."""
+
+    source = res.extra["source"]
+    rhs_normal = res.extra["rhs_normal"]
+    rhs_fault = res.extra["rhs_fault"]
+    machine_sc = res.extra["machine_sc"]
+    i_fault = res.extra["i_fault"]
+    n_seg1 = int(res.extra["N_segment1"])
+    n_extra = i_fault.shape[0]
+
+    uA = np.zeros(res.N, dtype=float)
+    uB = np.zeros(res.N, dtype=float)
+    uC = np.zeros(res.N, dtype=float)
+
+    for k in range(res.N):
+        t_k = float(res.t[k])
+        y_base = np.array(
+            [
+                res.i1A[k], res.i1B[k], res.i1C[k],
+                res.i2a[k], res.i2b[k], res.i2c[k],
+                res.omega_r[k],
+            ],
+            dtype=float,
+        )
+        E_src = np.asarray(source(t_k), dtype=float)
+
+        if k < n_seg1:
+            d_base = np.asarray(rhs_normal(t_k, y_base), dtype=float)
+            di_st = d_base[0:3]
+            i_f = np.zeros(n_extra, dtype=float)
+            di_f = np.zeros(n_extra, dtype=float)
+        else:
+            i_f = np.asarray(i_fault[:, k], dtype=float)
+            y_ext = np.concatenate([y_base, i_f])
+            d_ext = np.asarray(rhs_fault(t_k, y_ext), dtype=float)
+            di_st = d_ext[0:3]
+            di_f = d_ext[7:]
+
+        u = machine_sc.terminal_voltage(E_src, y_base[0:3], i_f, di_st, di_f)
+        uA[k], uB[k], uC[k] = float(u[0]), float(u[1]), float(u[2])
+
+    return uA, uB, uC
+
+
+def main() -> None:
+    """Запускает сценарий расчета из этого файла."""
+
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
+    params = MachineParameters()
+    print(params.info())
+
+    output_dir = "output"
+    os.makedirs(output_dir, exist_ok=True)
+
+    solver_cfg = SolverConfig(dt_out=2e-4, max_step=2e-4, rtol=1e-6, atol=1e-8)
+
+    R_SRC = 0.02           
+    L_SRC = 2e-4
+                  
+    R_F_GROUND = 0.001                                 
+    R_GROUND = 0.0                                    
+    R_F_PHASE = 0.001                                    
+
+                                                                        
+    print("\n")
+    print("  CASE 1: No-load + Phase-A-to-ground fault")
+    print("\n")
+
+    t_fault_no_load = 4.0                    
+
+    res1 = (
+        FaultSimulationBuilder(params)
+        .model(LinearInductionMachine)
+        .solver(ScipySolver("Radau", config=solver_cfg))
+        .scenario(MotorNoLoadThevenin(
+            t_end=8.0, Mc_idle=0.0,
+            r_series=R_SRC, l_series=L_SRC,
+        ))
+        .fault(phase_to_ground_fault(
+            "A", R_f=R_F_GROUND, t_fault=t_fault_no_load, R_ground=R_GROUND,
+        ))
+        .run()
+    )
+    plot_fault_results(res1, save_path=os.path.join(
+        output_dir, "fault_no_load_phase_A_ground.png"))
+    plot_stator_phase_iv_6(res1, save_path=os.path.join(
+        output_dir, "fault_no_load_phase_A_ground_stator_iv_6.png"))
+
+
+    print("\n")
+    print("  CASE 2: No-load + Phase-A-B fault (no ground)")
+    print("\n")
+
+    res2 = (
+        FaultSimulationBuilder(params)
+        .model(LinearInductionMachine)
+        .solver(ScipySolver("Radau", config=solver_cfg))
+        .scenario(MotorNoLoadThevenin(
+            t_end=8.0, Mc_idle=0.0,
+            r_series=R_SRC, l_series=L_SRC,
+        ))
+        .fault(phase_to_phase_fault(
+            "A", "B", R_f=R_F_PHASE, t_fault=t_fault_no_load,
+        ))
+        .run()
+    )
+    plot_fault_results(res2, save_path=os.path.join(
+        output_dir, "fault_no_load_phase_AB.png"))
+    plot_stator_phase_iv_6(res2, save_path=os.path.join(
+        output_dir, "fault_no_load_phase_AB_stator_iv_6.png"))
+
+                                                                        
+    print("\n")
+    print("  CASE 3: Step-load + Phase-A-to-ground fault (after step)")
+    print("\n")
+
+    t_step = 4.0
+    t_fault_step = 4.0                                        
+
+    res3 = (
+        FaultSimulationBuilder(params)
+        .model(LinearInductionMachine)
+        .solver(ScipySolver("Radau", config=solver_cfg))
+        .scenario(MotorStepLoadThevenin(
+            t_end=8.0, t_step=t_step,
+            r_series=R_SRC, l_series=L_SRC,
+        ))
+        .fault(phase_to_ground_fault(
+            "A", R_f=R_F_GROUND, t_fault=t_fault_step, R_ground=R_GROUND,
+        ))
+        .run()
+    )
+    plot_fault_results(res3, save_path=os.path.join(
+        output_dir, "fault_step_phase_A_ground.png"))
+    plot_stator_phase_iv_6(res3, save_path=os.path.join(
+        output_dir, "fault_step_phase_A_ground_stator_iv_6.png"))
+
+
+    print("\n")
+    print("  CASE 4: Step-load + Phase-A-B fault (no ground, after step)")
+    print("\n")
+
+    res4 = (
+        FaultSimulationBuilder(params)
+        .model(LinearInductionMachine)
+        .solver(ScipySolver("Radau", config=solver_cfg))
+        .scenario(MotorStepLoadThevenin(
+            t_end=8.0, t_step=t_step,
+            r_series=R_SRC, l_series=L_SRC,
+        ))
+        .fault(phase_to_phase_fault(
+            "A", "B", R_f=R_F_PHASE, t_fault=t_fault_step,
+        ))
+        .run()
+    )
+    plot_fault_results(res4, save_path=os.path.join(
+        output_dir, "fault_step_phase_AB.png"))
+    plot_stator_phase_iv_6(res4, save_path=os.path.join(
+        output_dir, "fault_step_phase_AB_stator_iv_6.png"))
+
+
+    print("\n")
+    print(f"  Saved fault plots in: {output_dir}/")
+    for f_name in sorted(os.listdir(output_dir)):
+        if f_name.startswith("fault_"):
+            print(f"    - {f_name}")
+    print("\n")
+
+
+if __name__ == "__main__":
+    main()

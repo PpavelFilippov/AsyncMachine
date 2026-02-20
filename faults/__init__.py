@@ -1,4 +1,10 @@
-﻿from .base import Fault, FaultType
-from .open_phase import OpenPhaseFault, GroundFault
-
-__all__ = ["Fault", "FaultType", "OpenPhaseFault", "GroundFault"]
+from .descriptors import (
+    FaultDescriptor,
+    phase_to_phase_fault,
+    phase_to_ground_fault,
+    two_phase_to_ground_fault,
+)
+from .interturn import (
+    InterTurnFaultDescriptor,
+    interturn_fault,
+)
