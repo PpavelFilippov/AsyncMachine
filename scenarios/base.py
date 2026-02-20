@@ -1,12 +1,10 @@
 """
-Абстрактный сценарий моделирования.
-
-Сценарий определяет:
-  - начальные условия (y0)
-  - источник напряжения
-  - нагрузку
-  - временной диапазон
+    Модуль scenarios/base.py.
+    Состав:
+    Классы: Scenario.
+    Функции: нет.
 """
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
@@ -20,33 +18,38 @@ from loads.base import LoadTorque
 
 
 class Scenario(ABC):
-    """Базовый класс сценария моделирования"""
+    """
+        Поля:
+        Явные поля уровня класса отсутствуют.
+        Методы:
+        Основные публичные методы: name, initial_state, voltage_source, load_torque, t_span, describe.
+    """
 
     @abstractmethod
     def name(self) -> str:
-        """Имя сценария для логов и графиков"""
+        """Определяет обязательный интерфейс метода."""
         ...
 
     @abstractmethod
     def initial_state(self, params: MachineParameters) -> np.ndarray:
-        """Начальный вектор состояния y0"""
+        """Возвращает начальное состояние системы."""
         ...
 
     @abstractmethod
     def voltage_source(self, params: MachineParameters) -> VoltageSource:
-        """Источник напряжения для данного сценария"""
+        """Формирует источник напряжения для сценария."""
         ...
 
     @abstractmethod
     def load_torque(self, params: MachineParameters) -> LoadTorque:
-        """Момент нагрузки для данного сценария"""
+        """Формирует закон момента нагрузки для сценария."""
         ...
 
     @abstractmethod
     def t_span(self) -> tuple[float, float]:
-        """Временной диапазон (t_start, t_end)"""
+        """Возвращает интервал моделирования."""
         ...
 
     def describe(self) -> str:
-        """Подробное описание сценария"""
+        """Возвращает текстовое описание объекта."""
         return self.name()

@@ -1,21 +1,8 @@
 """
-FaultSimulationBuilder — двухсегментная симуляция с КЗ на зажимах статора.
-
-Fluent API:
-    results = (
-        FaultSimulationBuilder(params)
-        .model(LinearInductionMachine)
-        .solver(ScipySolver("Radau"))
-        .scenario(MotorStepLoadScenario())
-        .fault(phase_to_phase_fault("B", "C", R_f=0.001, t_fault=2.0))
-        .run()
-    )
-
-Логика run():
-  1. Сегмент 1 (0 → t_fault): нормальный режим, стандартная система 7-го порядка.
-  2. В момент t_fault: расширяем вектор состояния (добавляем токи КЗ = 0).
-  3. Сегмент 2 (t_fault → t_end): расширенная система через LinearInductionMachineSC.
-  4. Склеиваем результаты.
+    Модуль simulation_fault.py.
+    Состав:
+    Классы: FaultSimulationBuilder.
+    Функции: нет.
 """
 from __future__ import annotations
 
@@ -36,12 +23,15 @@ from scenarios.base import Scenario
 
 class FaultSimulationBuilder:
     """
-    Двухсегментная симуляция: нормальный режим → КЗ.
-
-    Не затрагивает существующий SimulationBuilder.
+        Поля:
+        Явные поля уровня класса отсутствуют.
+        Методы:
+        Основные публичные методы: model, solver, solver_config, scenario, fault, run.
     """
 
     def __init__(self, params: Optional[MachineParameters] = None):
+        """Создает объект и сохраняет параметры для последующих вычислений."""
+
         self._params = params or MachineParameters()
         self._model_cls: Type[MachineModel] = LinearInductionMachine
         self._solver: Optional[Solver] = None
@@ -49,9 +39,6 @@ class FaultSimulationBuilder:
         self._solver_config: Optional[SolverConfig] = None
         self._fault: Optional[FaultDescriptor] = None
 
-    # ------------------------------------------------------------------
-    # Fluent API
-    # ------------------------------------------------------------------
 
     def model(self, model_cls: Type[MachineModel]) -> FaultSimulationBuilder:
         self._model_cls = model_cls
@@ -73,11 +60,10 @@ class FaultSimulationBuilder:
         self._fault = fault
         return self
 
-    # ------------------------------------------------------------------
-    # Execution
-    # ------------------------------------------------------------------
 
     def run(self) -> SimulationResults:
+        """Запускает расчет и возвращает результат."""
+
         if self._scenario is None:
             raise ValueError("Scenario is not set. Call .scenario(...)")
         if self._fault is None:
@@ -93,13 +79,13 @@ class FaultSimulationBuilder:
         scenario = self._scenario
         fault = self._fault
 
-        # Компоненты сценария
+                             
         y0 = scenario.initial_state(params)
         source = scenario.voltage_source(params)
         load = scenario.load_torque(params)
         t_span = scenario.t_span()
 
-        # Матрицы импеданса источника
+                                     
         r_src_mat = np.asarray(source.series_resistance_matrix(), dtype=float)
         l_src_mat = np.asarray(source.series_inductance_matrix(), dtype=float)
         _validate_3x3(r_src_mat, "series_resistance_matrix")
@@ -108,10 +94,10 @@ class FaultSimulationBuilder:
         l_src_embed = np.zeros((6, 6), dtype=float)
         l_src_embed[0:3, 0:3] = l_src_mat
 
-        # Базовая модель машины
+                               
         machine_base = self._model_cls(params)
 
-        # Модель машины с КЗ (строится сразу для валидации)
+                                                           
         machine_sc = LinearInductionMachineSC(
             params, fault, r_src_mat, l_src_mat,
         )
@@ -124,14 +110,16 @@ class FaultSimulationBuilder:
                 f"t_fault={t_fault} must be within t_span=({t_start}, {t_end})"
             )
 
-        # Callbacks
+                   
         def source_emf(t: float) -> np.ndarray:
+            """Возвращает фазные ЭДС источника в момент времени t."""
             return source(t)
 
         def Mc_func(t: float, omega_r: float) -> float:
+            """Возвращает момент нагрузки в момент времени t."""
             return load(t, omega_r)
 
-        # Logging
+                 
         print("\n")
         print(f"  {scenario.name()} + FAULT")
         print(f"  Model: {machine_base.__class__.__name__} → "
@@ -144,10 +132,10 @@ class FaultSimulationBuilder:
               f"t_fault = {t_fault:.4f} s")
         print("\n")
 
-        # ==============================================================
-        # Сегмент 1: нормальный режим [t_start, t_fault]
-        # ==============================================================
+                                                                        
         def rhs_normal(t: float, y: np.ndarray) -> np.ndarray:
+            """Вычисляет производные до момента включения короткого замыкания."""
+
             L_machine, b0 = machine_base.electrical_matrices(t, y)
             L_machine = np.asarray(L_machine, dtype=float)
             b0 = np.asarray(b0, dtype=float)
@@ -176,19 +164,16 @@ class FaultSimulationBuilder:
             raise RuntimeError(f"Segment 1 solver failed: {msg1}")
         print(f"  Segment 1 done. Points: {len(t1)}")
 
-        # ==============================================================
-        # Переход: расширяем вектор состояния
-        # ==============================================================
-        y_at_fault = y1[:, -1]  # последнее состояние сегмента 1
+
+        y_at_fault = y1[:, -1]                                  
         n_extra = fault.n_extra
         y0_ext = np.zeros(7 + n_extra, dtype=float)
         y0_ext[0:7] = y_at_fault
-        # i_fault начинается с нуля — в момент КЗ ещё нет тока через перемычку
 
-        # ==============================================================
-        # Сегмент 2: режим КЗ [t_fault, t_end]
-        # ==============================================================
+                                                                        
         def rhs_fault(t: float, y_ext: np.ndarray) -> np.ndarray:
+            """Вычисляет производные после включения короткого замыкания."""
+
             return machine_sc.ode_rhs(t, y_ext, Mc_func, source_emf)
 
         print("  Segment 2: short-circuit operation...")
@@ -199,13 +184,7 @@ class FaultSimulationBuilder:
             raise RuntimeError(f"Segment 2 solver failed: {msg2}")
         print(f"  Segment 2 done. Points: {len(t2)}")
 
-        # ==============================================================
-        # Склейка результатов
-        # ==============================================================
-        # Сегмент 1: y1 shape = [7, N1]
-        # Сегмент 2: y2 shape = [7+n_extra, N2]
-        # Первая точка сегмента 2 может совпадать с последней сегмента 1
-        # — убираем дубликат
+                            
         if len(t2) > 0 and len(t1) > 0 and abs(t2[0] - t1[-1]) < 1e-14:
             t2 = t2[1:]
             y2 = y2[:, 1:]
@@ -216,17 +195,17 @@ class FaultSimulationBuilder:
 
         t_merged = np.concatenate([t1, t2])
 
-        # Для базовых 7 переменных: прямая склейка
+                                                  
         y_base_merged = np.zeros((7, N_total), dtype=float)
         y_base_merged[:, :N1] = y1[0:7, :]
         y_base_merged[:, N1:] = y2[0:7, :]
 
-        # Токи КЗ: нули в сегменте 1, значения в сегменте 2
+                                                           
         i_fault_merged = np.zeros((n_extra, N_total), dtype=float)
         if n_extra > 0 and N2 > 0:
             i_fault_merged[:, N1:] = y2[7:7 + n_extra, :]
 
-        # Строим SimulationResults из базовых переменных
+                                                        
         results = SimulationResults.from_solver_output(
             t=t_merged,
             y=y_base_merged,
@@ -235,7 +214,7 @@ class FaultSimulationBuilder:
             solver_name=self._solver.describe(),
         )
 
-        # Сохраняем дополнительные данные
+                                         
         results.extra["machine_base"] = machine_base
         results.extra["machine_sc"] = machine_sc
         results.extra["machine"] = machine_base
@@ -244,7 +223,7 @@ class FaultSimulationBuilder:
         results.extra["fault"] = fault
         results.extra["source_r_matrix"] = r_src_mat.copy()
         results.extra["source_l_matrix"] = l_src_mat.copy()
-        results.extra["i_fault"] = i_fault_merged          # [n_extra, N_total]
+        results.extra["i_fault"] = i_fault_merged                              
         results.extra["t_fault"] = t_fault
         results.extra["N_segment1"] = N1
         results.extra["N_segment2"] = N2
@@ -259,5 +238,6 @@ class FaultSimulationBuilder:
 
 
 def _validate_3x3(mat: np.ndarray, name: str) -> None:
+    """Проверяет корректность параметров перед расчетом."""
     if mat.shape != (3, 3):
         raise ValueError(f"{name} must have shape (3, 3), got {mat.shape}")

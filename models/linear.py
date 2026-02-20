@@ -1,12 +1,8 @@
-﻿"""
-Линейная модель асинхронной машины в фазных координатах ABC.
-
-Модель НЕ учитывает:
-  - насыщение магнитопровода
-  - вытеснение тока в роторе
-  - потери в стали
-
-Это базовая физическая модель для дальнейшего расширения.
+"""
+    Модуль models/linear.py.
+    Состав:
+    Классы: LinearInductionMachine.
+    Функции: нет.
 """
 from __future__ import annotations
 
@@ -20,12 +16,15 @@ from .base import MachineModel
 
 class LinearInductionMachine(MachineModel):
     """
-    Линейная модель АМ в фазных координатах ABC.
-
-    Вектор состояния: y = [i1A, i1B, i1C, i2a, i2b, i2c, omega_r]
+        Поля:
+        Явные поля уровня класса отсутствуют.
+        Методы:
+        Основные публичные методы: electromagnetic_torque, flux_linkage_phaseA, electrical_matrices, mechanical_rhs, ode_rhs.
     """
 
     def __init__(self, params: MachineParameters):
+        """Создает объект и сохраняет параметры для последующих вычислений."""
+
         super().__init__(params)
 
         self.R1 = params.R1
@@ -39,25 +38,13 @@ class LinearInductionMachine(MachineModel):
         self.L1 = self.L1s + self.Lm
         self.L2 = self.L2s + self.Lm
 
-        # Матрица индуктивностей постоянна для линейной модели → кэшируем
+                                                                         
         self._L_matrix = self._build_inductance_matrix()
 
-    # ------------------------------------------------------------------
-    # Внутренние расчёты
-    # ------------------------------------------------------------------
 
     def _build_inductance_matrix(self) -> np.ndarray:
-        """
-        Полная матрица индуктивностей 6x6 в фазных координатах ABC.
+        """Собирает матрицу индуктивностей статора и ротора."""
 
-        Используется симметричная линейная модель с учётом взаимных связей
-        между всеми фазами статора и ротора:
-          - диагональные элементы: Lsigma + 2/3*Lm
-          - взаимные межфазные:   -1/3*Lm
-          - статер-ротор:
-              co-phase   +2/3*Lm
-              crossphase -1/3*Lm
-        """
         Mm = 2.0 * self.Lm / 3.0
         m_off = -0.5 * Mm
 
@@ -91,7 +78,8 @@ class LinearInductionMachine(MachineModel):
         imA: float, imB: float, imC: float,
         omega_mech: float,
     ) -> np.ndarray:
-        """Противо-ЭДС ротора от вращения"""
+        """Вычисляет ЭДС ротора от вращения и токов машины."""
+
         omega_e = omega_mech * self.p
         inv_sqrt3 = 1.0 / np.sqrt(3)
 
@@ -106,7 +94,8 @@ class LinearInductionMachine(MachineModel):
         i1A: float, i1B: float, i1C: float,
         i2a: float, i2b: float, i2c: float,
     ) -> float:
-        """Электромагнитный момент"""
+        """Вычисляет электромагнитный момент по токам."""
+
         return (self.p * self.Lm / np.sqrt(3)) * (
             (i1A * i2c + i1B * i2a + i1C * i2b)
             - (i1A * i2b + i1B * i2c + i1C * i2a)
@@ -117,7 +106,8 @@ class LinearInductionMachine(MachineModel):
         i1A: float, i1B: float, i1C: float,
         i2a: float, i2b: float, i2c: float,
     ) -> float:
-        """Потокосцепление фазы A статора"""
+        """Вычисляет потокосцепление фазы A."""
+
         Mm = 2.0 * self.Lm / 3.0
         return (
             self.L1s * i1A
@@ -130,10 +120,8 @@ class LinearInductionMachine(MachineModel):
         t: float,
         y: np.ndarray,
     ) -> tuple[np.ndarray, np.ndarray]:
-        """
-        Электрическая подсистема (без напряжения статора источника):
-            L * di/dt = b0 + [UsA, UsB, UsC, 0, 0, 0]
-        """
+        """Формирует матрицу и правую часть электрической подсистемы."""
+
         i1A, i1B, i1C = y[0], y[1], y[2]
         i2a, i2b, i2c = y[3], y[4], y[5]
         omega_r = y[6]
@@ -159,6 +147,8 @@ class LinearInductionMachine(MachineModel):
         y: np.ndarray,
         Mc: float,
     ) -> float:
+        """Вычисляет производную механической скорости."""
+
         i1A, i1B, i1C = y[0], y[1], y[2]
         i2a, i2b, i2c = y[3], y[4], y[5]
         Mem = self.electromagnetic_torque(i1A, i1B, i1C, i2a, i2b, i2c)
@@ -171,11 +161,8 @@ class LinearInductionMachine(MachineModel):
         Mc_func: Callable[[float, float], float],
         U_func: Callable[[float], np.ndarray],
     ) -> np.ndarray:
-        """
-        Правая часть ОДУ:
-            [L]*[di/dt] = [U] − [R*i] − [E_rot]
-            J*d(omega)/dt = Mэм − Mc
-        """
+        """Вычисляет правую часть системы дифференциальных уравнений."""
+
         Us = U_func(t)
         L, b0 = self.electrical_matrices(t, y)
         b = b0.copy()

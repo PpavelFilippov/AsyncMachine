@@ -1,6 +1,3 @@
-"""
-Модуль описания повреждений (КЗ) на зажимах статора.
-"""
 from .descriptors import (
     FaultDescriptor,
     phase_to_phase_fault,

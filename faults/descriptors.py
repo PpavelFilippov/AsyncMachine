@@ -1,13 +1,8 @@
 """
-Дескрипторы повреждений на зажимах статора асинхронной машины.
-
-Каждый тип КЗ описывается матрицей инцидентности D,
-связывающей дополнительные токи КЗ с фазами статора,
-и матрицей сопротивлений КЗ R_fault.
-
-Два класса повреждений:
-  1) Межфазное КЗ без земли (phase-to-phase)
-  2) КЗ фазы на землю (phase-to-ground)
+    Модуль faults/descriptors.py.
+    Состав:
+    Классы: FaultDescriptor.
+    Функции: phase_to_phase_fault, phase_to_ground_fault, two_phase_to_ground_fault.
 """
 from __future__ import annotations
 
@@ -23,17 +18,14 @@ _PHASE_INDEX = {"A": 0, "B": 1, "C": 2}
 @dataclass(frozen=True)
 class FaultDescriptor:
     """
-    Описание повреждения на зажимах статора.
+        Поля:
+        name: Поле класса. Тип: str.
+        D: Поле класса. Тип: np.ndarray.
+        R_fault: Поле класса. Тип: np.ndarray.
+        t_fault: Поле класса. Тип: float.
 
-    Attributes:
-        name:    человеко-читаемое имя повреждения
-        D:       матрица инцидентности [n_extra x 3].
-                 Связывает доп. токи КЗ с фазными токами статора.
-                 Для межфазного КЗ (B-C): D = [[0, +1, -1]]
-                 Для КЗ на землю (фаза A): D = [[1, 0, 0]]
-        R_fault: матрица сопротивлений КЗ [n_extra x n_extra].
-                 Диагональная для независимых путей КЗ.
-        t_fault: момент наступления КЗ, с
+        Методы:
+        Основные публичные методы: n_extra, D_2d, R_fault_2d.
     """
 
     name: str
@@ -42,6 +34,8 @@ class FaultDescriptor:
     t_fault: float
 
     def __post_init__(self):
+        """Вычисляет производные параметры после инициализации."""
+
         D = np.atleast_2d(self.D)
         if D.ndim != 2 or D.shape[1] != 3:
             raise ValueError(
@@ -56,21 +50,23 @@ class FaultDescriptor:
 
     @property
     def n_extra(self) -> int:
-        """Количество дополнительных переменных состояния (токов КЗ)."""
+        """Возвращает количество дополнительных токов ветвей короткого замыкания."""
         return np.atleast_2d(self.D).shape[0]
 
     @property
     def D_2d(self) -> np.ndarray:
-        """D гарантированно как 2D массив."""
+        """Возвращает диагональную матрицу проводимостей ветвей короткого замыкания."""
         return np.atleast_2d(self.D)
 
     @property
     def R_fault_2d(self) -> np.ndarray:
-        """R_fault гарантированно как 2D массив."""
+        """Возвращает диагональную матрицу сопротивлений ветвей короткого замыкания."""
         return np.atleast_2d(self.R_fault)
 
 
 def _phase_idx(phase: str) -> int:
+    """Выполняет шаг расчета для операции phase idx."""
+
     phase = phase.upper()
     if phase not in _PHASE_INDEX:
         raise ValueError(f"Unknown phase '{phase}', expected A, B, or C")
@@ -83,18 +79,8 @@ def phase_to_phase_fault(
     R_f: float,
     t_fault: float,
 ) -> FaultDescriptor:
-    """
-    Межфазное КЗ без земли.
+    """Создает описание режима короткого замыкания."""
 
-    Ток КЗ i_f течёт из phase_from в phase_to через R_f.
-    Вектор инцидентности d = [+1 на phase_from, -1 на phase_to].
-
-    Args:
-        phase_from: фаза-источник тока КЗ ("A", "B", или "C")
-        phase_to:   фаза-приёмник тока КЗ
-        R_f:        сопротивление КЗ, Ом (>0, болтовое ≈ 1e-4)
-        t_fault:    момент КЗ, с
-    """
     idx_from = _phase_idx(phase_from)
     idx_to = _phase_idx(phase_to)
     if idx_from == idx_to:
@@ -121,17 +107,8 @@ def phase_to_ground_fault(
     t_fault: float,
     R_ground: float = 0.0,
 ) -> FaultDescriptor:
-    """
-    КЗ одной фазы на землю.
+    """Создает описание режима короткого замыкания."""
 
-    Ток КЗ i_fg течёт из фазы phase в землю через R_f + R_ground.
-
-    Args:
-        phase:    замыкаемая фаза ("A", "B", или "C")
-        R_f:      сопротивление перехода КЗ, Ом
-        t_fault:  момент КЗ, с
-        R_ground: сопротивление заземления, Ом (по умолчанию 0)
-    """
     idx = _phase_idx(phase)
     d = np.zeros(3, dtype=float)
     d[idx] = 1.0
@@ -155,19 +132,8 @@ def two_phase_to_ground_fault(
     t_fault: float,
     R_ground: float = 0.0,
 ) -> FaultDescriptor:
-    """
-    Двухфазное КЗ на землю.
+    """Создает описание режима короткого замыкания."""
 
-    Каждая из двух фаз замыкается на землю через свой путь R_f + R_ground.
-    Это вводит 2 дополнительных переменных (ток КЗ каждой фазы).
-
-    Args:
-        phase_a:  первая замыкаемая фаза
-        phase_b:  вторая замыкаемая фаза
-        R_f:      сопротивление КЗ, Ом (одинаковое для обоих путей)
-        t_fault:  момент КЗ, с
-        R_ground: сопротивление заземления, Ом
-    """
     idx_a = _phase_idx(phase_a)
     idx_b = _phase_idx(phase_b)
     if idx_a == idx_b:

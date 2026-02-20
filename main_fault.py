@@ -1,12 +1,10 @@
 """
-Скрипт моделирования КЗ на зажимах статора асинхронной машины.
-
-Сценарии:
-  1) motor_no_load  + КЗ фазы A на землю
-  2) motor_no_load  + КЗ фаз A-B без земли
-  3) motor_step     + КЗ фазы A на землю  (КЗ после наброса нагрузки)
-  4) motor_step     + КЗ фаз A-B без земли (КЗ после наброса нагрузки)
+    Модуль main_fault.py.
+    Состав:
+    Классы: MotorNoLoadThevenin, MotorStepLoadThevenin.
+    Функции: plot_fault_results, plot_stator_phase_iv_6, main.
 """
+
 from __future__ import annotations
 
 import os
@@ -31,21 +29,25 @@ from solvers import ScipySolver, SolverConfig
 from sources.three_phase_thevenin import ThreePhaseSineTheveninSource
 
 
-# ======================================================================
-# Сценарии с Thevenin-источником (КЗ требует ненулевой импеданс)
-# ======================================================================
-
 class MotorNoLoadThevenin(MotorNoLoadScenario):
-    """Холостой ход с Thevenin-источником и мех. потерями."""
+    """
+        Поля:
+        Явные поля уровня класса отсутствуют.
+        Методы:
+        Основные публичные методы: voltage_source.
+    """
 
     def __init__(self, t_end: float = 4.0, Mc_idle: float = 0.0,
                  Mc_friction: float = 50.0,
                  r_series: float = 0.02, l_series: float = 2e-4):
+        """Создает объект и сохраняет параметры для последующих вычислений."""
+
         super().__init__(t_end=t_end, Mc_idle=Mc_idle, Mc_friction=Mc_friction)
         self._r_series = r_series
         self._l_series = l_series
 
     def voltage_source(self, params):
+        """Формирует источник напряжения для сценария."""
         return ThreePhaseSineTheveninSource(
             amplitude=params.Um, frequency=params.fn,
             r_series=self._r_series, l_series=self._l_series,
@@ -53,41 +55,46 @@ class MotorNoLoadThevenin(MotorNoLoadScenario):
 
 
 class MotorStepLoadThevenin(MotorStepLoadScenario):
-
+    """
+        Поля:
+        Явные поля уровня класса отсутствуют.
+        Методы:
+        Основные публичные методы: voltage_source.
+    """
     def __init__(self, t_end: float = 4.0, t_step: float = 2.0,
                  Mc_load: float | None = None, Mc_idle: float = 0.0,
                  Mc_friction: float = 50.0,
                  r_series: float = 0.02, l_series: float = 2e-4):
+        """Создает объект и сохраняет параметры для последующих вычислений."""
+
         super().__init__(t_end=t_end, t_step=t_step,
                          Mc_load=Mc_load, Mc_idle=Mc_idle, Mc_friction=Mc_friction)
         self._r_series = r_series
         self._l_series = l_series
 
     def voltage_source(self, params):
+        """Формирует источник напряжения для сценария."""
         return ThreePhaseSineTheveninSource(
             amplitude=params.Um, frequency=params.fn,
             r_series=self._r_series, l_series=self._l_series,
         )
 
-# ======================================================================
-# Графики для режимов КЗ
-# ======================================================================
 
 def plot_fault_results(
     res: SimulationResults,
     save_path: str | None = None,
 ) -> plt.Figure:
-    """Графики для симуляции с КЗ: токи, момент, скорость, ток КЗ."""
+    """Строит графики по данным моделирования."""
+
     t = res.t
     params = res.params
     t_fault = res.extra["t_fault"]
-    i_fault = res.extra["i_fault"]       # [n_extra, N]
+    i_fault = res.extra["i_fault"]                     
     n_extra = i_fault.shape[0]
 
     machine = res.extra["machine"]
     load = res.extra.get("load")
-
-    # Расчёт производных величин
+                                
     n_rpm = res.omega_r * 60.0 / (2.0 * np.pi)
     u1A, u1B, u1C = _compute_stator_phase_voltages(res)
 
@@ -109,7 +116,7 @@ def plot_fault_results(
         fontsize=13, fontweight="bold",
     )
 
-    # --- Row 0: Фазные токи статора ---
+                                        
     axes[0, 0].plot(t, res.i1A, "b-", lw=0.5, label="i1A")
     axes[0, 0].plot(t, res.i1B, "r-", lw=0.5, label="i1B")
     axes[0, 0].plot(t, res.i1C, "g-", lw=0.5, label="i1C")
@@ -119,7 +126,7 @@ def plot_fault_results(
                     title="Фазные токи статора")
     axes[0, 0].legend(fontsize=8)
 
-    # --- Row 0: Фазные напряжения статора ---
+                                              
     axes[0, 1].plot(t, u1A, "b-", lw=0.5, label="U1A")
     axes[0, 1].plot(t, u1B, "r-", lw=0.5, label="U1B")
     axes[0, 1].plot(t, u1C, "g-", lw=0.5, label="U1C")
@@ -129,7 +136,7 @@ def plot_fault_results(
                     title="Фазные напряжения статора")
     axes[0, 1].legend(fontsize=8)
 
-    # --- Row 1: Электромагнитный момент ---
+                                            
     axes[1, 0].plot(t, mem, "b-", lw=0.5)
     axes[1, 0].axhline(y=0, color="k", lw=0.5, ls="--")
     axes[1, 0].axvline(x=t_fault, color="k", lw=1.2, ls="--")
@@ -143,7 +150,7 @@ def plot_fault_results(
     axes[1, 0].set(xlabel="Время, с", ylabel="Момент, Нм",
                     title="Электромагнитный момент")
 
-    # --- Row 1: Скорость ---
+                             
     axes[1, 1].plot(t, n_rpm, "b-", lw=0.8)
     omega_sync = params.omega_sync
     n_sync = omega_sync * 60.0 / (2.0 * np.pi)
@@ -154,7 +161,7 @@ def plot_fault_results(
                     title="Частота вращения ротора")
     axes[1, 1].legend(fontsize=8)
 
-    # --- Row 2: Фазные токи ротора ---
+                                       
     axes[2, 0].plot(t, res.i2a, "b-", lw=0.5, label="i2a")
     axes[2, 0].plot(t, res.i2b, "r-", lw=0.5, label="i2b")
     axes[2, 0].plot(t, res.i2c, "g-", lw=0.5, label="i2c")
@@ -163,7 +170,7 @@ def plot_fault_results(
                     title="Фазные токи ротора")
     axes[2, 0].legend(fontsize=8)
 
-    # --- Row 2: Скольжение ---
+                               
     if abs(omega_sync) > 1e-10:
         slip = (omega_sync - res.omega_r) / omega_sync
         axes[2, 1].plot(t, slip, "b-", lw=0.6)
@@ -172,7 +179,7 @@ def plot_fault_results(
     axes[2, 1].set(xlabel="Время, с", ylabel="Скольжение s",
                     title="Скольжение s(t)")
 
-    # --- Rows 3+: Токи КЗ ---
+                              
     for j in range(n_extra):
         row = 3 + j
         axes[row, 0].plot(t, i_fault[j], "m-", lw=0.7)
@@ -181,7 +188,7 @@ def plot_fault_results(
         axes[row, 0].set(xlabel="Время, с", ylabel="Ток КЗ, А",
                           title=f"Ток короткого замыкания i_f{j+1}")
 
-        # Мощность на R_fault
+                             
         R_f_jj = res.extra["fault"].R_fault_2d[j, j]
         p_fault_j = R_f_jj * i_fault[j] ** 2
         axes[row, 1].plot(t, p_fault_j / 1e3, "r-", lw=0.7)
@@ -203,11 +210,8 @@ def plot_stator_phase_iv_6(
     res: SimulationResults,
     save_path: str | None = None,
 ) -> plt.Figure:
-    """
-    Отдельный график 3x2:
-      - слева фазные токи статора i1A/i1B/i1C,
-      - справа соответствующие фазные напряжения U1A/U1B/U1C.
-    """
+    """Строит графики по данным моделирования."""
+
     t = res.t
     t_fault = float(res.extra.get("t_fault", t[-1]))
     u1A, u1B, u1C = _compute_stator_phase_voltages(res)
@@ -258,13 +262,8 @@ def plot_stator_phase_iv_6(
 def _compute_stator_phase_voltages(
     res: SimulationResults,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """
-    Reconstruct stator terminal phase voltages for fault simulation results.
+    """Вычисляет фазные напряжения статора по токам и ЭДС источника."""
 
-    For pre-fault part uses rhs_normal and zero fault currents.
-    For post-fault part uses rhs_fault and model-consistent source current
-    (i_source = i_stator + D^T * i_fault).
-    """
     source = res.extra["source"]
     rhs_normal = res.extra["rhs_normal"]
     rhs_fault = res.extra["rhs_fault"]
@@ -307,11 +306,9 @@ def _compute_stator_phase_voltages(
     return uA, uB, uC
 
 
-# ======================================================================
-# Основной скрипт
-# ======================================================================
-
 def main() -> None:
+    """Запускает сценарий расчета из этого файла."""
+
     try:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     except Exception:
@@ -325,23 +322,19 @@ def main() -> None:
 
     solver_cfg = SolverConfig(dt_out=2e-4, max_step=2e-4, rtol=1e-6, atol=1e-8)
 
-    # Параметры источника (Thevenin)
-    R_SRC = 0.02       # Ом
-    L_SRC = 2e-4       # Гн
+    R_SRC = 0.02           
+    L_SRC = 2e-4
+                  
+    R_F_GROUND = 0.001                                 
+    R_GROUND = 0.0                                    
+    R_F_PHASE = 0.001                                    
 
-    # Параметры КЗ
-    R_F_GROUND = 0.001  # сопротивление КЗ на землю, Ом
-    R_GROUND = 0.0      # сопротивление заземления, Ом
-    R_F_PHASE = 0.001   # сопротивление межфазного КЗ, Ом
-
-    # ==================================================================
-    # 1) motor_no_load + КЗ фазы A на землю
-    # ==================================================================
-    print("=" * 70)
+                                                                        
+    print("\n")
     print("  CASE 1: No-load + Phase-A-to-ground fault")
-    print("=" * 70)
+    print("\n")
 
-    t_fault_no_load = 4.0  # КЗ после разгона
+    t_fault_no_load = 4.0                    
 
     res1 = (
         FaultSimulationBuilder(params)
@@ -361,12 +354,10 @@ def main() -> None:
     plot_stator_phase_iv_6(res1, save_path=os.path.join(
         output_dir, "fault_no_load_phase_A_ground_stator_iv_6.png"))
 
-    # ==================================================================
-    # 2) motor_no_load + КЗ фаз A-B без земли
-    # ==================================================================
-    print("=" * 70)
+
+    print("\n")
     print("  CASE 2: No-load + Phase-A-B fault (no ground)")
-    print("=" * 70)
+    print("\n")
 
     res2 = (
         FaultSimulationBuilder(params)
@@ -386,15 +377,13 @@ def main() -> None:
     plot_stator_phase_iv_6(res2, save_path=os.path.join(
         output_dir, "fault_no_load_phase_AB_stator_iv_6.png"))
 
-    # ==================================================================
-    # 3) motor_step + КЗ фазы A на землю (КЗ после step)
-    # ==================================================================
-    print("=" * 70)
+                                                                        
+    print("\n")
     print("  CASE 3: Step-load + Phase-A-to-ground fault (after step)")
-    print("=" * 70)
+    print("\n")
 
     t_step = 4.0
-    t_fault_step = 4.0   # КЗ через 1 с после наброса нагрузки
+    t_fault_step = 4.0                                        
 
     res3 = (
         FaultSimulationBuilder(params)
@@ -414,12 +403,10 @@ def main() -> None:
     plot_stator_phase_iv_6(res3, save_path=os.path.join(
         output_dir, "fault_step_phase_A_ground_stator_iv_6.png"))
 
-    # ==================================================================
-    # 4) motor_step + КЗ фаз A-B без земли (КЗ после step)
-    # ==================================================================
-    print("=" * 70)
+
+    print("\n")
     print("  CASE 4: Step-load + Phase-A-B fault (no ground, after step)")
-    print("=" * 70)
+    print("\n")
 
     res4 = (
         FaultSimulationBuilder(params)
@@ -439,15 +426,13 @@ def main() -> None:
     plot_stator_phase_iv_6(res4, save_path=os.path.join(
         output_dir, "fault_step_phase_AB_stator_iv_6.png"))
 
-    # ==================================================================
-    # Итог
-    # ==================================================================
-    print("\n" + "=" * 70)
+
+    print("\n")
     print(f"  Saved fault plots in: {output_dir}/")
     for f_name in sorted(os.listdir(output_dir)):
         if f_name.startswith("fault_"):
             print(f"    - {f_name}")
-    print("=" * 70)
+    print("\n")
 
 
 if __name__ == "__main__":

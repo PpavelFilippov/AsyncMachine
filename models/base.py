@@ -1,8 +1,8 @@
-﻿"""
-Абстрактный интерфейс электрической машины.
-
-Любая модель (линейная, нелинейная, с насыщением, etc.)
-должна реализовать этот интерфейс
+"""
+    Модуль models/base.py.
+    Состав:
+    Классы: MachineModel.
+    Функции: нет.
 """
 from __future__ import annotations
 
@@ -16,15 +16,10 @@ from core.parameters import MachineParameters
 
 class MachineModel(ABC):
     """
-    Базовый класс модели асинхронной машины.
-
-    Контракт:
-      - electrical_matrices(t, y)         -> (L, b0)         - эл. подсистема без источника
-      - mechanical_rhs(t, y, Mc)          -> domega_dt       - мех. уравнение
-      - ode_rhs(t, y, Mc_func, U_func)    -> dydt            - совместимость
-      - electromagnetic_torque(y)         -> float           - момент по токам
-      - result_current_module(iA, iB, iC) -> float           - модуль тока
-      - flux_linkage_phaseA(y)            -> float           - потокосцепление фазы A
+        Поля:
+        Явные поля уровня класса отсутствуют.
+        Методы:
+        Основные публичные методы: electrical_matrices, mechanical_rhs, ode_rhs, electromagnetic_torque, result_current_module, result_voltage_module, flux_linkage_phaseA.
     """
 
     def __init__(self, params: MachineParameters):
@@ -36,14 +31,7 @@ class MachineModel(ABC):
         t: float,
         y: np.ndarray,
     ) -> tuple[np.ndarray, np.ndarray]:
-        """
-        Электрическая часть модели в виде:
-            L(y, t) * di/dt = b0(y, t) + [UsA, UsB, UsC, 0, 0, 0]
-
-        где:
-            L  - матрица [6x6]
-            b0 - вектор [6], не включает напряжение источника статора.
-        """
+        """Формирует матрицу и правую часть электрической подсистемы."""
         ...
 
     @abstractmethod
@@ -53,7 +41,7 @@ class MachineModel(ABC):
         y: np.ndarray,
         Mc: float,
     ) -> float:
-        """Правая часть механического уравнения d(omega_r)/dt"""
+        """Вычисляет производную механической скорости."""
         ...
 
     @abstractmethod
@@ -64,18 +52,7 @@ class MachineModel(ABC):
         Mc_func: Callable[[float, float], float],
         U_func: Callable[[float], np.ndarray],
     ) -> np.ndarray:
-        """
-        Правая часть системы ОДУ.
-
-        Args:
-            t: текущее время
-            y: вектор состояния [i1A, i1B, i1C, i2a, i2b, i2c, omega_r]
-            Mc_func: функция момента сопротивления Mc(t, omega_r)
-            U_func: функция напряжения U(t) -> [U1A, U1B, U1C]
-
-        Returns:
-            dydt: производные вектора состояния
-        """
+        """Вычисляет правую часть системы дифференциальных уравнений."""
         ...
 
     @abstractmethod
@@ -83,15 +60,15 @@ class MachineModel(ABC):
         self, i1A: float, i1B: float, i1C: float,
         i2a: float, i2b: float, i2c: float,
     ) -> float:
-        """Электромагнитный момент по мгновенным значениям токов"""
+        """Вычисляет электромагнитный момент по токам."""
         ...
 
     def result_current_module(self, iA: float, iB: float, iC: float) -> float:
-        """Модуль результирующего вектора тока (общая формула)"""
+        """Вычисляет модуль трехфазного тока по результатам моделирования."""
         return np.sqrt((iB - iC) ** 2 / 3.0 + iA ** 2)
 
     def result_voltage_module(self, uA: float, uB: float, uC: float) -> float:
-        """Модуль результирующего вектора напряжения"""
+        """Вычисляет модуль трехфазного напряжения по результатам моделирования."""
         return np.sqrt((uB - uC) ** 2 / 3.0 + uA ** 2)
 
     @abstractmethod
@@ -99,5 +76,5 @@ class MachineModel(ABC):
         self, i1A: float, i1B: float, i1C: float,
         i2a: float, i2b: float, i2c: float,
     ) -> float:
-        """Потокосцепление фазы A статора"""
+        """Вычисляет потокосцепление фазы A."""
         ...

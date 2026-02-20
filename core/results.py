@@ -1,7 +1,8 @@
-﻿"""
-Контейнер результатов моделирования.
-
-Хранит временные ряды всех переменных и метаданные запуска
+"""
+    Модуль core/results.py.
+    Состав:
+    Классы: SimulationResults.
+    Функции: нет.
 """
 from __future__ import annotations
 
@@ -15,32 +16,29 @@ from .parameters import MachineParameters
 
 @dataclass
 class SimulationResults:
-    """Результаты одного прогона моделирования"""
+    """Класс отображения результатов
+        Методы:
+        Основные публичные методы: from_solver_output, N, steady_state_slice, summary.
+    """
 
-    #Время
     t: np.ndarray
 
-    #Токи статора
+                 
     i1A: np.ndarray
     i1B: np.ndarray
     i1C: np.ndarray
 
-    #Токи ротора
     i2a: np.ndarray
     i2b: np.ndarray
     i2c: np.ndarray
 
-    # Механика
     omega_r: np.ndarray
-
-    #Метаданные
+               
     params: MachineParameters
     scenario_name: str = ""
     solver_name: str = ""
-
-    # Опциональные производные ряды.
-    # По умолчанию не заполняются в SimulationBuilder.run(), чтобы хранить
-    # только сырой выход солвера.
+                                                                          
+                                 
     Mem: Optional[np.ndarray] = None
     I1_mod: Optional[np.ndarray] = None
     I2_mod: Optional[np.ndarray] = None
@@ -57,9 +55,9 @@ class SimulationResults:
     imC: Optional[np.ndarray] = None
     P_elec: Optional[np.ndarray] = None
     P_mech: Optional[np.ndarray] = None
-    Mc: Optional[np.ndarray] = None  # момент нагрузки на валу
+    Mc: Optional[np.ndarray] = None                           
 
-    # Дополнительные данные (для расширения)
+                                            
     extra: Dict[str, Any] = field(default_factory=dict)
 
     @classmethod
@@ -71,7 +69,8 @@ class SimulationResults:
         scenario_name: str = "",
         solver_name: str = "",
     ) -> SimulationResults:
-        """Создать из массива solve_ivp-стиля (y shape = [7, N])"""
+        """Собирает объект результатов из данных решателя."""
+
         return cls(
             t=t,
             i1A=y[0], i1B=y[1], i1C=y[2],
@@ -84,15 +83,18 @@ class SimulationResults:
 
     @property
     def N(self) -> int:
+        """Возвращает число расчетных точек по времени."""
         return len(self.t)
 
     def steady_state_slice(self, fraction: float = 0.75) -> slice:
-        """Срез для анализа установившегося режима (последние 25% данных)"""
+        """Возвращает часть данных после указанного времени установления."""
+
         idx = int(fraction * self.N)
         return slice(idx, None)
 
     def summary(self) -> str:
-        """Краткая сводка результатов установившегося режима"""
+        """Формирует сводку по результатам расчета."""
+
         ss = self.steady_state_slice()
         lines = [
             f"  Сценарий: {self.scenario_name}",
@@ -100,7 +102,7 @@ class SimulationResults:
             f"  Точек: {self.N}, t = [{self.t[0]:.3f} .. {self.t[-1]:.3f}] с",
         ]
 
-        # Speed/slip from raw omega_r.
+                                      
         n_rpm = self.omega_r * 60.0 / (2.0 * np.pi)
         lines.append(f"  Скорость (уст.): {np.mean(n_rpm[ss]):.1f} об/мин")
 
@@ -114,7 +116,7 @@ class SimulationResults:
             slip = (omega_sync - self.omega_r) / omega_sync
             lines.append(f"  Скольжение (уст.): {np.mean(slip[ss]):.5f}")
 
-        # Resultant stator current module from raw phase currents.
+                                                                  
         i1_mod = np.sqrt((self.i1B - self.i1C) ** 2 / 3.0 + self.i1A ** 2)
         i1_p50 = float(np.median(i1_mod[ss]))
         i1_p95 = float(np.percentile(i1_mod[ss], 95))
@@ -126,7 +128,7 @@ class SimulationResults:
         lines.append(f"  I1A (уст., фазн., RMS): {i1a_rms:.1f} А")
         lines.append(f"  I1B (уст., фазн., RMS): {i1b_rms:.1f} А")
 
-        # Optional model/source-based stats from extra metadata.
+                                                                
         machine = self.extra.get("machine")
         if machine is not None:
             mem = np.fromiter(

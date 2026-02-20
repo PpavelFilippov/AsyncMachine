@@ -1,15 +1,8 @@
-﻿"""
-Build comparison plots for legacy and DAE implementations.
-
-This script creates plots for both modes:
-1) No-fault:
-   - legacy: SimulationBuilder
-   - new:    DAESimulationBuilder
-2) Fault:
-   - legacy: FaultSimulationBuilder
-   - new:    DAESimulationBuilder
-
-Output directory defaults to: output/test
+"""
+    Модуль test.py.
+    Состав:
+    Классы: MotorNoLoadThevenin, MotorStepLoadThevenin.
+    Функции: parse_args, plot_fault_results_portable, run_no_fault_cases, run_fault_cases, main.
 """
 from __future__ import annotations
 
@@ -42,7 +35,12 @@ matplotlib.rcParams["figure.dpi"] = 150
 
 
 class MotorNoLoadThevenin(MotorNoLoadScenario):
-    """No-load scenario with Thevenin source for fault studies"""
+    """
+        Поля:
+        Явные поля уровня класса отсутствуют.
+        Методы:
+        Основные публичные методы: voltage_source.
+    """
 
     def __init__(
         self,
@@ -52,11 +50,14 @@ class MotorNoLoadThevenin(MotorNoLoadScenario):
         r_series: float,
         l_series: float,
     ):
+        """Создает объект и сохраняет параметры для последующих вычислений."""
+
         super().__init__(t_end=t_end, Mc_idle=mc_idle, Mc_friction=mc_friction)
         self._r_series = r_series
         self._l_series = l_series
 
     def voltage_source(self, params: MachineParameters):
+        """Формирует источник напряжения для сценария."""
         return ThreePhaseSineTheveninSource(
             amplitude=params.Um,
             frequency=params.fn,
@@ -66,7 +67,12 @@ class MotorNoLoadThevenin(MotorNoLoadScenario):
 
 
 class MotorStepLoadThevenin(MotorStepLoadScenario):
-    """Step-load scenario with Thevenin source for fault studies"""
+    """
+        Поля:
+        Явные поля уровня класса отсутствуют.
+        Методы:
+        Основные публичные методы: voltage_source.
+    """
 
     def __init__(
         self,
@@ -78,6 +84,8 @@ class MotorStepLoadThevenin(MotorStepLoadScenario):
         r_series: float,
         l_series: float,
     ):
+        """Создает объект и сохраняет параметры для последующих вычислений."""
+
         super().__init__(
             t_end=t_end,
             t_step=t_step,
@@ -89,6 +97,7 @@ class MotorStepLoadThevenin(MotorStepLoadScenario):
         self._l_series = l_series
 
     def voltage_source(self, params: MachineParameters):
+        """Формирует источник напряжения для сценария."""
         return ThreePhaseSineTheveninSource(
             amplitude=params.Um,
             frequency=params.fn,
@@ -98,6 +107,8 @@ class MotorStepLoadThevenin(MotorStepLoadScenario):
 
 
 def parse_args() -> argparse.Namespace:
+    """Разбирает аргументы командной строки."""
+
     parser = argparse.ArgumentParser(
         description="Build plots for legacy vs DAE implementations (fault/no-fault)"
     )
@@ -120,10 +131,13 @@ def parse_args() -> argparse.Namespace:
 
 
 def _slug(value: str) -> str:
+    """Преобразует строку в безопасный идентификатор имени файла."""
     return re.sub(r"[^a-z0-9]+", "_", value.lower()).strip("_")
 
 
 def _print_base_diff(label: str, res_old, res_dae) -> None:
+    """Печатает отличие результатов DAE и legacy без короткого замыкания."""
+
     errs = {
         "dt": np.max(np.abs(res_old.t - res_dae.t)),
         "di1A": np.max(np.abs(res_old.i1A - res_dae.i1A)),
@@ -142,6 +156,8 @@ def _print_base_diff(label: str, res_old, res_dae) -> None:
 
 
 def _print_fault_diff(label: str, res_old, res_dae) -> None:
+    """Печатает отличие результатов DAE и legacy при коротком замыкании."""
+
     _print_base_diff(label, res_old, res_dae)
     i_f_old = res_old.extra["i_fault"]
     i_f_dae = res_dae.extra["i_fault"]
@@ -155,11 +171,8 @@ def _print_fault_diff(label: str, res_old, res_dae) -> None:
 def _compute_fault_stator_phase_voltages(
     res,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """
-    Reconstruct stator phase voltages:
-        u_term = e_src - R_src*i_src - L_src*di_src/dt
-    Supports both legacy and DAE fault results.
-    """
+    """Вычисляет фазные напряжения статора в режиме с коротким замыканием."""
+
     source = res.extra["source"]
     fault = res.extra["fault"]
     rhs_normal = res.extra["rhs_normal"]
@@ -215,7 +228,8 @@ def plot_fault_results_portable(
     save_fault_path: str,
     save_iv6_path: str,
 ) -> None:
-    """Build fault plots that work for both legacy and DAE results."""
+    """Строит графики по данным моделирования."""
+
     t = res.t
     t_fault = float(res.extra["t_fault"])
     i_fault = np.asarray(res.extra["i_fault"], dtype=float)
@@ -245,7 +259,7 @@ def plot_fault_results_portable(
     )
     u1A, u1B, u1C = _compute_fault_stator_phase_voltages(res)
 
-    # Main fault dashboard
+
     n_rows = 3 + n_extra
     fig, axes = plt.subplots(n_rows, 2, figsize=(16, 4 * n_rows))
     fig.suptitle(f"Fault Results ({res.scenario_name})", fontsize=13, fontweight="bold")
@@ -312,7 +326,7 @@ def plot_fault_results_portable(
     plt.close(fig)
     print(f"  Saved: {save_fault_path}")
 
-    # 3x2 stator I/V figure
+                           
     fig2, axes2 = plt.subplots(3, 2, figsize=(16, 12), sharex=True)
     fig2.suptitle(f"Stator phase I/V 3x2 ({res.scenario_name})", fontsize=13, fontweight="bold")
     phase_rows = [
@@ -346,6 +360,8 @@ def run_no_fault_cases(
     out_dir: Path,
     fast: bool,
 ) -> None:
+    """Запускает сравнение DAE и legacy без короткого замыкания."""
+
     if fast:
         cases = [
             ("motor_start", MotorStartScenario(t_end=1.5)),
@@ -361,9 +377,9 @@ def run_no_fault_cases(
     no_fault_dir.mkdir(parents=True, exist_ok=True)
 
     for label, scenario in cases:
-        print("\n" + "=" * 70)
+        print("\n")
         print(f"NO-FAULT CASE: {label}")
-        print("=" * 70)
+        print("\n")
 
         res_old = (
             SimulationBuilder(params)
@@ -400,6 +416,8 @@ def run_fault_cases(
     out_dir: Path,
     fast: bool,
 ) -> None:
+    """Запускает сравнение DAE и legacy для режимов короткого замыкания."""
+
     r_src = 0.02
     l_src = 2e-4
     r_f_ground = 0.001
@@ -446,9 +464,9 @@ def run_fault_cases(
     fault_dir.mkdir(parents=True, exist_ok=True)
 
     for label, scenario, fault in cases:
-        print("\n" + "=" * 70)
+        print("\n")
         print(f"FAULT CASE: {label}")
-        print("=" * 70)
+        print("\n")
 
         res_old = (
             FaultSimulationBuilder(params)
@@ -483,6 +501,8 @@ def run_fault_cases(
 
 
 def main() -> None:
+    """Запускает сценарий расчета из этого файла."""
+
     args = parse_args()
 
     try:

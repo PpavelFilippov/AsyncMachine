@@ -1,6 +1,8 @@
-﻿"""
-Решатель на базе scipy.integrate.solve_ivp
 """
+Модуль solvers/scipy_solver.py.
+Состав:
+Классы: ScipySolver.
+Функции: нет."""
 from __future__ import annotations
 
 from typing import Callable, Optional
@@ -13,9 +15,10 @@ from .base import Solver, SolverConfig
 
 class ScipySolver(Solver):
     """
-    Обёртка над solve_ivp с выбором метода.
-
-    Поддерживаемые методы: RK45, RK23, DOP853, Radau, BDF, LSODA
+        Поля:
+        METHODS: Поле класса. Тип: tuple.
+        Методы:
+        Основные публичные методы: solve, describe.
     """
 
     METHODS = ("RK45", "RK23", "DOP853", "Radau", "BDF", "LSODA")
@@ -25,6 +28,8 @@ class ScipySolver(Solver):
         method: str = "RK45",
         config: Optional[SolverConfig] = None,
     ):
+        """Создает объект и сохраняет параметры для последующих вычислений."""
+
         super().__init__(config)
         if method not in self.METHODS:
             raise ValueError(
@@ -40,6 +45,8 @@ class ScipySolver(Solver):
         t_span: tuple[float, float],
         t_eval: Optional[np.ndarray] = None,
     ) -> tuple[np.ndarray, np.ndarray, bool, str]:
+
+        """Численно решает систему и возвращает объект решения."""
 
         if t_eval is None:
             t0, t1 = float(t_span[0]), float(t_span[1])
@@ -72,6 +79,8 @@ class ScipySolver(Solver):
         return sol.t, sol.y, sol.success, sol.message
 
     def describe(self) -> str:
+        """Возвращает текстовое описание объекта."""
+
         return (
             f"SciPy solve_ivp ({self.method}), "
             f"rtol={self.config.rtol}, atol={self.config.atol}, "

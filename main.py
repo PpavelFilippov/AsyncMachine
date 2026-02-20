@@ -1,4 +1,10 @@
-﻿"""Project entry point: single-machine simulation examples without faults."""
+"""
+    Модуль main.py.
+    Состав:
+    Классы: нет.
+    Функции: main.
+"""
+
 from __future__ import annotations
 
 import os
@@ -11,6 +17,8 @@ from solvers import ScipySolver, SolverConfig
 
 
 def main() -> None:
+    """Запускает сценарий расчета из этого файла."""
+
     try:
         import sys
 

@@ -1,15 +1,9 @@
-﻿"""
-Sweep of motor_step scenario for different shaft torque values.
-
-What the script does:
-1) Runs MotorStepLoadScenario for multiple torque multipliers of M_nom.
-2) Computes steady-state metrics after load step:
-   - phase A RMS current (I1A_rms)
-   - phase A amplitude from waveform (I1A_amp_abs_max, max abs value)
-   - phase A amplitude estimated from RMS (I1A_amp_from_rms = sqrt(2)*RMS)
-3) Finds torque M_target where I1A_rms == In (bisection in multiplier range).
-4) Saves a summary table to CSV.
-5) Builds a plot of RMS and amplitude vs torque multiplier.
+"""
+    Модуль motor_step_torque_sweep.py.
+    Состав:
+    Классы: нет.
+    Функции: parse_args, phase_rms, current_module, steady_slice, evaluate_torque_point, run_for_multipliers,
+    find_torque_for_in, save_csv, print_table, save_plot, main.
 """
 from __future__ import annotations
 
@@ -30,6 +24,8 @@ from solvers import ScipySolver, SolverConfig
 
 
 def parse_args() -> argparse.Namespace:
+    """Разбирает аргументы командной строки."""
+
     parser = argparse.ArgumentParser(
         description="Motor-step torque sweep with RMS/amplitude report."
     )
@@ -66,14 +62,17 @@ def parse_args() -> argparse.Namespace:
 
 
 def phase_rms(values: np.ndarray) -> float:
+    """Вычисляет действующее значение сигнала фазы."""
     return float(np.sqrt(np.mean(values ** 2)))
 
 
 def current_module(iA: np.ndarray, iB: np.ndarray, iC: np.ndarray) -> np.ndarray:
+    """Вычисляет модуль трехфазного вектора тока."""
     return np.sqrt((iB - iC) ** 2 / 3.0 + iA ** 2)
 
 
 def steady_slice(n_points: int, steady_frac: float) -> slice:
+    """Возвращает срез сигнала после окончания переходного процесса."""
     idx = int(n_points * steady_frac)
     return slice(idx, None)
 
@@ -86,6 +85,7 @@ def evaluate_torque_point(
     steady_frac: float,
     mc_load: float,
 ) -> dict[str, float]:
+    """Проводит расчет для одного множителя момента нагрузки."""
     scenario = MotorStepLoadScenario(
         t_end=t_end,
         t_step=t_step,
@@ -143,6 +143,7 @@ def run_for_multipliers(
     cfg: SolverConfig,
     steady_frac: float,
 ) -> list[dict[str, float]]:
+    """Выполняет расчеты для набора множителей момента."""
     rows: list[dict[str, float]] = []
 
     for k in multipliers:
@@ -173,6 +174,8 @@ def find_torque_for_in(
     k_high: float,
     iterations: int,
 ) -> dict[str, float]:
+    """Подбирает множитель момента для заданного установившегося тока."""
+
     target = params.In
     low = k_low * params.M_nom
     high = k_high * params.M_nom
@@ -208,6 +211,8 @@ def find_torque_for_in(
 
 
 def save_csv(rows: list[dict[str, float]], csv_path: Path) -> None:
+    """Сохраняет данные в файл."""
+
     csv_path.parent.mkdir(parents=True, exist_ok=True)
     fieldnames = [
         "case",
@@ -232,6 +237,8 @@ def print_table(
     in_nom: float,
     target_row: dict[str, float],
 ) -> None:
+    """Печатает таблицу результатов подбора."""
+
     headers = [
         "k*M_nom",
         "Mc, Nm",
@@ -268,6 +275,8 @@ def save_plot(
     target_row: dict[str, float],
     png_path: Path,
 ) -> None:
+    """Сохраняет данные в файл."""
+
     x = np.array([r["k_Mnom"] for r in rows], dtype=float)
     y_rms = np.array([r["I1A_rms_A"] for r in rows], dtype=float)
     y_amp = np.array([r["I1A_amp_abs_max_A"] for r in rows], dtype=float)
@@ -304,9 +313,10 @@ def save_plot(
 
 
 def main() -> None:
+    """Запускает сценарий расчета из этого файла."""
     args = parse_args()
 
-    # Avoid console encoding crashes on symbols from scenario logs.
+
     try:
         import sys
 

@@ -1,5 +1,8 @@
-﻿"""
-Сценарий: прямой пуск асинхронного двигателя.
+"""
+    Модуль scenarios/motor_start.py.
+    Состав:
+    Классы: MotorStartScenario.
+    Функции: нет.
 """
 from __future__ import annotations
 
@@ -16,10 +19,10 @@ from .base import Scenario
 
 class MotorStartScenario(Scenario):
     """
-    Прямой пуск АД от сети.
-
-    Ротор стартует с omega = 0, подаётся номинальное напряжение.
-    Нагрузка подключается после разгона
+        Поля:
+        Явные поля уровня класса отсутствуют.
+        Методы:
+        Основные публичные методы: name, initial_state, voltage_source, load_torque, t_span, describe.
     """
 
     def __init__(
@@ -30,6 +33,8 @@ class MotorStartScenario(Scenario):
         t_load_start: float = 0.8,
         t_load_ramp: float = 0.3,
     ):
+        """Создает объект и сохраняет параметры для последующих вычислений."""
+
         self.t_end = t_end
         self.Mc_load = Mc_load
         self.Mc_friction = Mc_friction
@@ -37,18 +42,24 @@ class MotorStartScenario(Scenario):
         self.t_load_ramp = t_load_ramp
 
     def name(self) -> str:
+        """Возвращает имя сценария моделирования."""
         return "ПРЯМОЙ ПУСК АД"
 
     def initial_state(self, params: MachineParameters) -> np.ndarray:
+        """Возвращает начальное состояние системы."""
         return make_initial_state(omega_r=0.0)
 
     def voltage_source(self, params: MachineParameters) -> VoltageSource:
+        """Формирует источник напряжения для сценария."""
+
         return ThreePhaseSineSource(
             amplitude=params.Um,
             frequency=params.fn,
         )
 
     def load_torque(self, params: MachineParameters) -> LoadTorque:
+        """Формирует закон момента нагрузки для сценария."""
+
         return MotorStartTorque(
             Mc_load=self.Mc_load,
             Mc_friction=self.Mc_friction,
@@ -57,9 +68,12 @@ class MotorStartScenario(Scenario):
         )
 
     def t_span(self) -> tuple[float, float]:
+        """Возвращает интервал моделирования."""
         return (0.0, self.t_end)
 
     def describe(self) -> str:
+        """Возвращает текстовое описание объекта."""
+
         return (
             f"{self.name()}: Mc_нагр={self.Mc_load:.0f} Нм, "
             f"t_end={self.t_end:.1f} с"

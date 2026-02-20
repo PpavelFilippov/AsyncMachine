@@ -1,13 +1,8 @@
 """
-Демо-скрипт: моделирование через схемный ассемблер (DAE).
-
-Валидация:
-  Часть A: DAESimulationBuilder (без КЗ) vs SimulationBuilder
-           (4 сценария: пуск, ХХ, ступенька, установившийся режим)
-  Часть B: DAESimulationBuilder (с КЗ) vs FaultSimulationBuilder
-           (4 сценария: ХХ+КЗ, ступенька+КЗ)
-
-Сравнивает результаты и проверяет числовую идентичность.
+    Модуль main_fault_dae.py.
+    Состав:
+    Классы: MotorNoLoadThevenin, MotorStepLoadThevenin.
+    Функции: compare_base_results, compare_fault_results, run_part_a, run_part_b, main.
 """
 from __future__ import annotations
 
@@ -30,19 +25,26 @@ from solvers import ScipySolver, SolverConfig
 from sources.three_phase_thevenin import ThreePhaseSineTheveninSource
 
 
-# ======================================================================
-# Сценарии с Thevenin-источником (для КЗ)
-# ======================================================================
-
 class MotorNoLoadThevenin(MotorNoLoadScenario):
+    """
+        Поля:
+        Явные поля уровня класса отсутствуют.
+        Методы:
+        Основные публичные методы: voltage_source.
+    """
+
     def __init__(self, t_end: float = 4.0, Mc_idle: float = 0.0,
                  Mc_friction: float = 50.0,
                  r_series: float = 0.02, l_series: float = 2e-4):
+        """Создает объект и сохраняет параметры для последующих вычислений."""
+
         super().__init__(t_end=t_end, Mc_idle=Mc_idle, Mc_friction=Mc_friction)
         self._r_series = r_series
         self._l_series = l_series
 
     def voltage_source(self, params):
+        """Формирует источник напряжения для сценария."""
+
         return ThreePhaseSineTheveninSource(
             amplitude=params.Um, frequency=params.fn,
             r_series=self._r_series, l_series=self._l_series,
@@ -50,25 +52,31 @@ class MotorNoLoadThevenin(MotorNoLoadScenario):
 
 
 class MotorStepLoadThevenin(MotorStepLoadScenario):
+    """
+        Поля:
+        Явные поля уровня класса отсутствуют.
+        Методы:
+        Основные публичные методы: voltage_source.
+    """
+
     def __init__(self, t_end: float = 4.0, t_step: float = 2.0,
                  Mc_load: float | None = None, Mc_idle: float = 0.0,
                  Mc_friction: float = 50.0,
                  r_series: float = 0.02, l_series: float = 2e-4):
+        """Создает объект и сохраняет параметры для последующих вычислений."""
         super().__init__(t_end=t_end, t_step=t_step,
                          Mc_load=Mc_load, Mc_idle=Mc_idle, Mc_friction=Mc_friction)
         self._r_series = r_series
         self._l_series = l_series
 
     def voltage_source(self, params):
+        """Формирует источник напряжения для сценария."""
+
         return ThreePhaseSineTheveninSource(
             amplitude=params.Um, frequency=params.fn,
             r_series=self._r_series, l_series=self._l_series,
         )
 
-
-# ======================================================================
-# Утилиты сравнения
-# ======================================================================
 
 def compare_base_results(
     res_old: SimulationResults,
@@ -76,7 +84,8 @@ def compare_base_results(
     label: str,
     tol: float = 1e-8,
 ) -> bool:
-    """Сравнить базовые 7 переменных. Вернуть True если совпадают."""
+    """Сравнивает результаты расчетов."""
+
     print(f"\n  --- Сравнение: {label} ---")
 
     if len(res_old.t) != len(res_new.t):
@@ -110,10 +119,10 @@ def compare_fault_results(
     label: str,
     tol: float = 1e-8,
 ) -> bool:
-    """Сравнить базовые 7 переменных + токи КЗ."""
+    """Сравнивает результаты расчетов."""
     passed = compare_base_results(res_old, res_new, label, tol)
 
-    # Дополнительно: токи КЗ
+                            
     i_f_old = res_old.extra["i_fault"]
     i_f_new = res_new.extra["i_fault"]
     if i_f_old.shape != i_f_new.shape:
@@ -130,15 +139,12 @@ def compare_fault_results(
     return passed
 
 
-# ======================================================================
-# Часть A: без КЗ — DAESimulationBuilder vs SimulationBuilder
-# ======================================================================
-
 def run_part_a(params: MachineParameters, solver_cfg: SolverConfig) -> bool:
-    """Сравнение DAESimulationBuilder (без КЗ) с SimulationBuilder."""
-    print("\n" + "#" * 70)
+    """Выполняет сравнение DAE и legacy без короткого замыкания."""
+
+    print("\n")
     print("  PART A: DAESimulationBuilder (no fault) vs SimulationBuilder")
-    print("#" * 70)
+    print("\n")
 
     scenarios = [
         ("Motor Start", MotorStartScenario(t_end=2.5)),
@@ -150,11 +156,11 @@ def run_part_a(params: MachineParameters, solver_cfg: SolverConfig) -> bool:
     all_passed = True
 
     for i, (label, scenario) in enumerate(scenarios, 1):
-        print("\n" + "=" * 70)
+        print("\n")
         print(f"  A.{i}: {label}")
-        print("=" * 70)
+        print("\n")
 
-        # --- Старый путь: SimulationBuilder ---
+
         print("\n  >>> OLD path (SimulationBuilder):")
         res_old = (
             SimulationBuilder(params)
@@ -164,7 +170,7 @@ def run_part_a(params: MachineParameters, solver_cfg: SolverConfig) -> bool:
             .run()
         )
 
-        # --- Новый путь: DAESimulationBuilder (без fault) ---
+                                                              
         print("\n  >>> NEW path (DAESimulationBuilder, no fault):")
         res_new = (
             DAESimulationBuilder(params)
@@ -181,15 +187,12 @@ def run_part_a(params: MachineParameters, solver_cfg: SolverConfig) -> bool:
     return all_passed
 
 
-# ======================================================================
-# Часть B: с КЗ — DAESimulationBuilder vs FaultSimulationBuilder
-# ======================================================================
-
 def run_part_b(params: MachineParameters, solver_cfg: SolverConfig) -> bool:
-    """Сравнение DAESimulationBuilder (с КЗ) с FaultSimulationBuilder."""
-    print("\n" + "#" * 70)
+    """Выполняет сравнение DAE и legacy в режиме короткого замыкания."""
+
+    print("\n")
     print("  PART B: DAESimulationBuilder (with fault) vs FaultSimulationBuilder")
-    print("#" * 70)
+    print("\n")
 
     R_SRC = 0.02
     L_SRC = 2e-4
@@ -215,11 +218,11 @@ def run_part_b(params: MachineParameters, solver_cfg: SolverConfig) -> bool:
     all_passed = True
 
     for i, (label, scenario, fault) in enumerate(cases, 1):
-        print("\n" + "=" * 70)
+        print("\n")
         print(f"  B.{i}: {label}")
-        print("=" * 70)
+        print("\n")
 
-        # --- Старый путь: FaultSimulationBuilder ---
+                                                     
         print("\n  >>> OLD path (FaultSimulationBuilder):")
         res_old = (
             FaultSimulationBuilder(params)
@@ -230,7 +233,7 @@ def run_part_b(params: MachineParameters, solver_cfg: SolverConfig) -> bool:
             .run()
         )
 
-        # --- Новый путь: DAESimulationBuilder ---
+                                                  
         print("\n  >>> NEW path (DAESimulationBuilder):")
         res_new = (
             DAESimulationBuilder(params)
@@ -248,11 +251,8 @@ def run_part_b(params: MachineParameters, solver_cfg: SolverConfig) -> bool:
     return all_passed
 
 
-# ======================================================================
-# Основной скрипт
-# ======================================================================
-
 def main() -> None:
+    """Запускает сценарий расчета из этого файла."""
     try:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     except Exception:
@@ -266,15 +266,15 @@ def main() -> None:
     passed_a = run_part_a(params, solver_cfg)
     passed_b = run_part_b(params, solver_cfg)
 
-    # Итог
-    print("\n" + "=" * 70)
+
+    print("\n")
     print(f"  PART A (no fault): {'ALL PASSED' if passed_a else 'SOME FAILED'}")
     print(f"  PART B (with fault): {'ALL PASSED' if passed_b else 'SOME FAILED'}")
     if passed_a and passed_b:
         print("  OVERALL: ALL TESTS PASSED")
     else:
         print("  OVERALL: SOME TESTS FAILED")
-    print("=" * 70)
+    print("\n")
 
 
 if __name__ == "__main__":

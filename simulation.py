@@ -1,15 +1,8 @@
-﻿"""
-SimulationBuilder - single-machine simulation orchestrator.
-
-Fluent API for configuration and run:
-
-    results = (
-        SimulationBuilder(params)
-        .model(LinearInductionMachine)
-        .solver(ScipySolver(method="RK45"))
-        .scenario(MotorStartScenario())
-        .run()
-    )
+"""
+    Модуль simulation.py.
+    Состав:
+    Классы: SimulationBuilder.
+    Функции: нет.
 """
 from __future__ import annotations
 
@@ -28,42 +21,42 @@ from scenarios.base import Scenario
 
 class SimulationBuilder:
     """
-    Single-machine simulation builder.
-
-    Collects configuration and runs calculation with .run().
+        Поля:
+        Явные поля уровня класса отсутствуют.
+        Методы:
+        Основные публичные методы: model, solver, solver_config, scenario, run.
     """
 
     def __init__(self, params: Optional[MachineParameters] = None):
+        """Создает объект и сохраняет параметры для последующих вычислений."""
+
         self._params = params or MachineParameters()
         self._model_cls: Type[MachineModel] = LinearInductionMachine
         self._solver: Optional[Solver] = None
         self._scenario: Optional[Scenario] = None
         self._solver_config: Optional[SolverConfig] = None
 
-    # Fluent API
+                
     def model(self, model_cls: Type[MachineModel]) -> SimulationBuilder:
-        """Choose machine model"""
         self._model_cls = model_cls
         return self
 
     def solver(self, solver: Solver) -> SimulationBuilder:
-        """Choose numerical solver"""
         self._solver = solver
         return self
 
     def solver_config(self, config: SolverConfig) -> SimulationBuilder:
-        """Set solver configuration"""
         self._solver_config = config
         return self
 
     def scenario(self, scenario: Scenario) -> SimulationBuilder:
-        """Choose simulation scenario"""
         self._scenario = scenario
         return self
 
-    # Execution
+               
     def run(self) -> SimulationResults:
-        """Run simulation and return results"""
+        """Запускает расчет и возвращает результат."""
+
         if self._scenario is None:
             raise ValueError("Scenario is not set. Call .scenario(...)")
 
@@ -76,10 +69,8 @@ class SimulationBuilder:
         params = self._params
         scenario = self._scenario
 
-        # 1. Create machine model
         machine = self._model_cls(params)
-
-        # 2. Read scenario components
+                                     
         y0 = scenario.initial_state(params)
         source = scenario.voltage_source(params)
         load = scenario.load_torque(params)
@@ -88,15 +79,20 @@ class SimulationBuilder:
         l_src_embed = np.zeros((6, 6), dtype=float)
         l_src_embed[0:3, 0:3] = l_src_mat
 
-        # 3. Source and load callbacks
+
         def source_emf(t: float) -> np.ndarray:
+            """Возвращает фазные ЭДС источника в момент времени t."""
             return source(t)
 
+
         def Mc_func(t: float, omega_r: float) -> float:
+            """Возвращает момент нагрузки в момент времени t."""
             return load(t, omega_r)
 
-        # 4. ODE right-hand side (single modular path for any source model)
+                                                                           
         def rhs(t: float, y: np.ndarray) -> np.ndarray:
+            """Вычисляет производные состояния для интегратора."""
+
             L_machine, b0_machine = machine.electrical_matrices(t, y)
             L_machine = np.asarray(L_machine, dtype=float)
             b0_machine = np.asarray(b0_machine, dtype=float)
@@ -132,7 +128,7 @@ class SimulationBuilder:
             dydt[6] = domega_dt
             return dydt
 
-        # 5. Logging
+                    
         print("\n")
         print(f"  {scenario.name()}")
         print(f"  Model: {machine.__class__.__name__}")
@@ -142,7 +138,7 @@ class SimulationBuilder:
         print(f"  t = [{t_span[0]:.2f}, {t_span[1]:.2f}] s")
         print("\n")
 
-        # 6. Solve
+                  
         t, y, success, message = self._solver.solve(rhs, y0, t_span)
 
         if not success:
@@ -150,7 +146,7 @@ class SimulationBuilder:
 
         print(f"  Solution obtained. Points: {len(t)}")
 
-        # 7. Build result container
+                                   
         results = SimulationResults.from_solver_output(
             t=t,
             y=y,
@@ -158,8 +154,8 @@ class SimulationBuilder:
             scenario_name=scenario.name(),
             solver_name=self._solver.describe(),
         )
-        # Keep only raw solver output in results. Derived values are computed
-        # on demand from the same model equations when statistics are needed.
+                                                                             
+                                                                             
         results.extra["machine"] = machine
         results.extra["source"] = source
         results.extra["load"] = load
@@ -174,7 +170,8 @@ class SimulationBuilder:
 
     @staticmethod
     def _source_series_matrices(source) -> tuple[np.ndarray, np.ndarray]:
-        """Return source series R/L matrices in phase coordinates (3x3)."""
+        """Возвращает матрицы последовательных сопротивлений и индуктивностей источника."""
+
         R = np.asarray(source.series_resistance_matrix(), dtype=float)
         L = np.asarray(source.series_inductance_matrix(), dtype=float)
         if R.shape != (3, 3):

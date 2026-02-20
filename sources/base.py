@@ -1,8 +1,8 @@
 """
-Abstract voltage source interface.
-
-Source provides three-phase EMF vector e(t) in phase coordinates [A, B, C].
-Optional series impedance is represented by 3x3 R/L matrices.
+    Модуль sources/base.py.
+    Состав:
+    Классы: VoltageSource.
+    Функции: нет.
 """
 from __future__ import annotations
 
@@ -12,34 +12,31 @@ import numpy as np
 
 
 class VoltageSource(ABC):
-    """Base class for voltage sources."""
+    """
+        Поля:
+        Явные поля уровня класса отсутствуют.
+        Методы:
+        Основные публичные методы: series_resistance_matrix, series_inductance_matrix, electrical_frequency_hz, describe.
+    """
 
     @abstractmethod
     def __call__(self, t: float) -> np.ndarray:
-        """
-        Return source EMF vector [eA, eB, eC] at time t.
-        """
+        """Возвращает значение функции источника или нагрузки в момент времени t."""
         ...
 
     def series_resistance_matrix(self) -> np.ndarray:
-        """
-        Per-phase series resistance matrix (3x3), Ohm.
-        Ideal source -> zeros.
-        """
+        """Возвращает матрицу последовательных сопротивлений источника."""
         return np.zeros((3, 3), dtype=float)
 
     def series_inductance_matrix(self) -> np.ndarray:
-        """
-        Per-phase series inductance matrix (3x3), Henry.
-        Ideal source -> zeros.
-        """
+        """Возвращает матрицу последовательных индуктивностей источника."""
         return np.zeros((3, 3), dtype=float)
 
     def electrical_frequency_hz(self) -> float | None:
-        """Electrical source frequency in Hz (if defined)."""
+        """Возвращает электрическую частоту источника в герцах."""
         return None
 
     @abstractmethod
     def describe(self) -> str:
-        """Text description for logs."""
+        """Возвращает текстовое описание объекта."""
         ...

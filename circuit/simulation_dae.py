@@ -1,30 +1,8 @@
 """
-DAESimulationBuilder — схемный билдер симуляции.
-
-Двигатель используется как чёрный ящик (только electrical_matrices).
-Схема собирается внешним ассемблером.
-
-Поддерживает два режима:
-  1) Без КЗ  — односегментная симуляция (аналог SimulationBuilder)
-  2) С КЗ    — двухсегментная симуляция (аналог FaultSimulationBuilder)
-
-Fluent API:
-    # Без КЗ:
-    results = (
-        DAESimulationBuilder(params)
-        .scenario(MotorStartScenario())
-        .solver(ScipySolver("RK45"))
-        .run()
-    )
-
-    # С КЗ:
-    results = (
-        DAESimulationBuilder(params)
-        .scenario(MotorNoLoadThevenin(t_end=8.0))
-        .fault(phase_to_ground_fault("A", R_f=0.001, t_fault=4.0))
-        .solver(ScipySolver("Radau"))
-        .run()
-    )
+    Модуль circuit/simulation_dae.py.
+    Состав:
+    Классы: DAESimulationBuilder.
+    Функции: нет.
 """
 from __future__ import annotations
 
@@ -50,13 +28,16 @@ from .assembler import CircuitAssembler
 
 class DAESimulationBuilder:
     """
-    Универсальный билдер симуляции через схемный ассемблер.
+        Поля:
+        Явные поля уровня класса отсутствуют.
 
-    ОДУ двигателя не модифицируются. Ассемблер строит систему уравнений
-    снаружи двигателя. Поддерживает как нормальный режим, так и КЗ.
+        Методы:
+        Основные публичные методы: model, source, fault, load, solver, solver_config, time_span, scenario, run.
     """
 
     def __init__(self, params: Optional[MachineParameters] = None):
+        """Создает объект и сохраняет параметры для последующих вычислений."""
+
         self._params = params or MachineParameters()
         self._model_cls: Type[MachineModel] = LinearInductionMachine
         self._source: Optional[VoltageSource] = None
@@ -67,9 +48,7 @@ class DAESimulationBuilder:
         self._t_span: Optional[tuple[float, float]] = None
         self._scenario: Optional[Scenario] = None
 
-    # ------------------------------------------------------------------
-    # Fluent API
-    # ------------------------------------------------------------------
+                                                                        
 
     def model(self, model_cls: Type[MachineModel]) -> DAESimulationBuilder:
         self._model_cls = model_cls
@@ -80,6 +59,8 @@ class DAESimulationBuilder:
         return self
 
     def fault(self, fault: FaultDescriptor) -> DAESimulationBuilder:
+        """Возвращает описание короткого замыкания для текущего расчета."""
+
         self._faults.append(fault)
         return self
 
@@ -103,23 +84,20 @@ class DAESimulationBuilder:
         self._scenario = scenario
         return self
 
-    # ------------------------------------------------------------------
-    # Execution
-    # ------------------------------------------------------------------
 
     def run(self) -> SimulationResults:
-        """Собрать схему и запустить симуляцию."""
+        """Запускает расчет и возвращает результат."""
+
         if self._faults:
             return self._run_with_fault()
         else:
             return self._run_normal()
 
-    # ------------------------------------------------------------------
-    # Нормальный режим (без КЗ)
-    # ------------------------------------------------------------------
+                                                                        
 
     def _run_normal(self) -> SimulationResults:
-        """Односегментная симуляция без КЗ."""
+        """Выполняет DAE расчет без короткого замыкания."""
+
         params = self._params
         source, load_torque, y0, t_span = self._resolve_scenario(params)
         solver = self._resolve_solver()
@@ -127,9 +105,11 @@ class DAESimulationBuilder:
         machine = self._model_cls(params)
 
         def Mc_func(t: float, omega_r: float) -> float:
+            """Возвращает момент нагрузки в момент времени t."""
+
             return load_torque(t, omega_r)
 
-        # Топология: двигатель + источник
+                                         
         motor_comp = MotorComponent(machine, Mc_func)
         source_comp = SourceComponent(source)
 
@@ -144,7 +124,7 @@ class DAESimulationBuilder:
             state_size=topo.state_size,
         )
 
-        # Logging
+                 
         scenario_name = self._scenario.name() if self._scenario else "Custom"
         print("\n")
         print(f"  {scenario_name} (DAE circuit assembler)")
@@ -155,7 +135,7 @@ class DAESimulationBuilder:
         print(f"  t = [{t_span[0]:.2f}, {t_span[1]:.2f}] s")
         print("\n")
 
-        # Solve
+               
         t, y, ok, msg = solver.solve(rhs, y0, t_span)
         if not ok:
             raise RuntimeError(f"Solver failed: {msg}")
@@ -180,12 +160,10 @@ class DAESimulationBuilder:
 
         return results
 
-    # ------------------------------------------------------------------
-    # Режим с КЗ (двухсегментный)
-    # ------------------------------------------------------------------
 
     def _run_with_fault(self) -> SimulationResults:
-        """Двухсегментная симуляция: нормальный режим -> КЗ."""
+        """Выполняет DAE расчет с включением короткого замыкания."""
+
         params = self._params
         source, load_torque, y0, t_span = self._resolve_scenario(params)
         solver = self._resolve_solver()
@@ -202,11 +180,10 @@ class DAESimulationBuilder:
         machine = self._model_cls(params)
 
         def Mc_func(t: float, omega_r: float) -> float:
+            """Возвращает момент нагрузки в момент времени t."""
             return load_torque(t, omega_r)
 
-        # ----------------------------------------------------------
-        # Топология для сегмента 1: двигатель + источник (без КЗ)
-        # ----------------------------------------------------------
+
         motor_comp = MotorComponent(machine, Mc_func)
         source_comp = SourceComponent(source)
 
@@ -216,9 +193,7 @@ class DAESimulationBuilder:
 
         assembler_normal = CircuitAssembler(topo_normal)
 
-        # ----------------------------------------------------------
-        # Топология для сегмента 2: двигатель + источник + КЗ
-        # ----------------------------------------------------------
+                                                                    
         fault_comp = FaultBranchComponent(fault)
 
         motor_comp_2 = MotorComponent(machine, Mc_func)
@@ -232,7 +207,7 @@ class DAESimulationBuilder:
         assembler_fault = CircuitAssembler(topo_fault)
         assembler_fault.validate_source_impedance(topo_fault.faults)
 
-        # Logging
+                 
         scenario_name = self._scenario.name() if self._scenario else "Custom"
         print("\n")
         print(f"  {scenario_name} + FAULT (DAE circuit assembler)")
@@ -244,10 +219,8 @@ class DAESimulationBuilder:
         print(f"  t = [{t_start:.2f}, {t_end:.2f}] s, "
               f"t_fault = {t_fault:.4f} s")
         print("\n")
-
-        # ==============================================================
-        # Сегмент 1: нормальный режим [t_start, t_fault]
-        # ==============================================================
+                                                        
+                                                                        
         rhs_normal = assembler_normal.build_ode_rhs(
             active_faults=[],
             state_size=topo_normal.state_size,
@@ -259,17 +232,13 @@ class DAESimulationBuilder:
             raise RuntimeError(f"Segment 1 solver failed: {msg1}")
         print(f"  Segment 1 done. Points: {len(t1)}")
 
-        # ==============================================================
-        # Переход: расширяем вектор состояния
-        # ==============================================================
+                                                                        
         y_at_fault = y1[:, -1]
         n_extra = fault.n_extra
         y0_ext = np.zeros(7 + n_extra, dtype=float)
         y0_ext[0:7] = y_at_fault
 
-        # ==============================================================
-        # Сегмент 2: режим КЗ [t_fault, t_end]
-        # ==============================================================
+                                                                        
         rhs_fault = assembler_fault.build_ode_rhs(
             active_faults=topo_fault.faults,
             state_size=topo_fault.state_size,
@@ -281,9 +250,7 @@ class DAESimulationBuilder:
             raise RuntimeError(f"Segment 2 solver failed: {msg2}")
         print(f"  Segment 2 done. Points: {len(t2)}")
 
-        # ==============================================================
-        # Склейка результатов
-        # ==============================================================
+                                                                        
         if len(t2) > 0 and len(t1) > 0 and abs(t2[0] - t1[-1]) < 1e-14:
             t2 = t2[1:]
             y2 = y2[:, 1:]
@@ -330,12 +297,10 @@ class DAESimulationBuilder:
 
         return results
 
-    # ------------------------------------------------------------------
-    # Internal
-    # ------------------------------------------------------------------
 
     def _resolve_solver(self) -> Solver:
-        """Инициализировать солвер."""
+        """Возвращает решатель из аргумента или использует решатель по умолчанию."""
+
         if self._solver is None:
             cfg = self._solver_config or SolverConfig()
             self._solver = ScipySolver(method="RK45", config=cfg)
@@ -344,9 +309,8 @@ class DAESimulationBuilder:
         return self._solver
 
     def _resolve_scenario(self, params: MachineParameters):
-        """
-        Извлечь source, load, y0, t_span из сценария или прямых настроек.
-        """
+        """Возвращает сценарий из аргумента или использует сценарий по умолчанию."""
+
         if self._scenario is not None:
             source = self._source or self._scenario.voltage_source(params)
             load_torque = self._load or self._scenario.load_torque(params)
