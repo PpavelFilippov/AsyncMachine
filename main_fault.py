@@ -341,14 +341,14 @@ def main() -> None:
     print("  CASE 1: No-load + Phase-A-to-ground fault")
     print("=" * 70)
 
-    t_fault_no_load = 2.0  # КЗ после разгона
+    t_fault_no_load = 4.0  # КЗ после разгона
 
     res1 = (
         FaultSimulationBuilder(params)
         .model(LinearInductionMachine)
         .solver(ScipySolver("Radau", config=solver_cfg))
         .scenario(MotorNoLoadThevenin(
-            t_end=4.0, Mc_idle=0.0,
+            t_end=8.0, Mc_idle=0.0,
             r_series=R_SRC, l_series=L_SRC,
         ))
         .fault(phase_to_ground_fault(
@@ -373,7 +373,7 @@ def main() -> None:
         .model(LinearInductionMachine)
         .solver(ScipySolver("Radau", config=solver_cfg))
         .scenario(MotorNoLoadThevenin(
-            t_end=4.0, Mc_idle=0.0,
+            t_end=8.0, Mc_idle=0.0,
             r_series=R_SRC, l_series=L_SRC,
         ))
         .fault(phase_to_phase_fault(
@@ -393,15 +393,15 @@ def main() -> None:
     print("  CASE 3: Step-load + Phase-A-to-ground fault (after step)")
     print("=" * 70)
 
-    t_step = 2.0
-    t_fault_step = 3.0   # КЗ через 1 с после наброса нагрузки
+    t_step = 4.0
+    t_fault_step = 4.0   # КЗ через 1 с после наброса нагрузки
 
     res3 = (
         FaultSimulationBuilder(params)
         .model(LinearInductionMachine)
         .solver(ScipySolver("Radau", config=solver_cfg))
         .scenario(MotorStepLoadThevenin(
-            t_end=5.0, t_step=t_step,
+            t_end=8.0, t_step=t_step,
             r_series=R_SRC, l_series=L_SRC,
         ))
         .fault(phase_to_ground_fault(
@@ -426,7 +426,7 @@ def main() -> None:
         .model(LinearInductionMachine)
         .solver(ScipySolver("Radau", config=solver_cfg))
         .scenario(MotorStepLoadThevenin(
-            t_end=5.0, t_step=t_step,
+            t_end=8.0, t_step=t_step,
             r_series=R_SRC, l_series=L_SRC,
         ))
         .fault(phase_to_phase_fault(
