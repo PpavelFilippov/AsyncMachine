@@ -13,17 +13,21 @@ import numpy as np
 from core.parameters import MachineParameters
 from core.results import SimulationResults
 from faults.descriptors import FaultDescriptor
+from faults.interturn import InterTurnFaultDescriptor
 from loads.base import LoadTorque
 from models.base import MachineModel
 from models.linear import LinearInductionMachine
+from models.linear_segmented import SegmentedLinearInductionMachine
 from scenarios.base import Scenario
 from solvers.base import Solver, SolverConfig
 from solvers.scipy_solver import ScipySolver
 from sources.base import VoltageSource
 
 from .components import MotorComponent, SourceComponent, FaultBranchComponent
+from .components_seg import SegmentedMotorComponent
 from .topology import CircuitTopology
 from .assembler import CircuitAssembler
+from .assembler_seg import SegmentedCircuitAssembler
 
 
 class DAESimulationBuilder:
@@ -42,6 +46,7 @@ class DAESimulationBuilder:
         self._model_cls: Type[MachineModel] = LinearInductionMachine
         self._source: Optional[VoltageSource] = None
         self._faults: list[FaultDescriptor] = []
+        self._interturn_fault: Optional[InterTurnFaultDescriptor] = None
         self._load: Optional[LoadTorque] = None
         self._solver: Optional[Solver] = None
         self._solver_config: Optional[SolverConfig] = None
@@ -62,6 +67,13 @@ class DAESimulationBuilder:
         """Возвращает описание короткого замыкания для текущего расчета."""
 
         self._faults.append(fault)
+        return self
+
+    def interturn_fault(
+        self, fault: InterTurnFaultDescriptor
+    ) -> DAESimulationBuilder:
+        """Задает межвитковое замыкание для расчета."""
+        self._interturn_fault = fault
         return self
 
     def load(self, load: LoadTorque) -> DAESimulationBuilder:
@@ -88,7 +100,9 @@ class DAESimulationBuilder:
     def run(self) -> SimulationResults:
         """Запускает расчет и возвращает результат."""
 
-        if self._faults:
+        if self._interturn_fault is not None:
+            return self._run_with_interturn_fault()
+        elif self._faults:
             return self._run_with_fault()
         else:
             return self._run_normal()
@@ -297,6 +311,231 @@ class DAESimulationBuilder:
 
         return results
 
+
+    def _run_with_interturn_fault(self) -> SimulationResults:
+        """Выполняет DAE расчет с межвитковым замыканием.
+
+        Двухсегментный подход:
+        - Сегмент 1 (0 -> t_fault): сегментированная модель в здоровом режиме (7 перем.)
+        - Сегмент 2 (t_fault -> t_end): МВЗ, расширенная система (8 перем.)
+        """
+        params = self._params
+        source, load_torque, y0_base, t_span = self._resolve_scenario(params)
+        solver = self._resolve_solver()
+
+        itf = self._interturn_fault
+        t_start, t_end = t_span
+        t_fault = itf.t_fault
+
+        if t_fault <= t_start or t_fault >= t_end:
+            raise ValueError(
+                f"t_fault={t_fault} must be within t_span=({t_start}, {t_end})"
+            )
+
+        # Создаём сегментированную модель с mu соответствующей фазы
+        mu_kw = {"mu_A": 0.1, "mu_B": 0.1, "mu_C": 0.1}
+        mu_kw[f"mu_{itf.phase}"] = itf.mu
+        machine = SegmentedLinearInductionMachine(params, **mu_kw)
+
+        def Mc_func(t: float, omega_r: float) -> float:
+            """Возвращает момент нагрузки."""
+            return load_torque(t, omega_r)
+
+        # ---- Сегмент 1: здоровый режим ----
+        C_healthy = machine.constraint_matrix_healthy()
+        line_idx_h = machine.line_current_indices_healthy()
+
+        motor_comp_h = SegmentedMotorComponent(
+            machine, Mc_func, C_healthy, line_idx_h,
+        )
+        motor_comp_h.state_offset = 0
+        source_comp = SourceComponent(source)
+
+        assembler_h = SegmentedCircuitAssembler(
+            motor_comp_h, source_comp, fault=None,
+        )
+
+        state_size_h = motor_comp_h.n_diff_vars   # 7
+
+        rhs_normal = assembler_h.build_ode_rhs(state_size=state_size_h)
+
+        # Печать информации
+        scenario_name = self._scenario.name() if self._scenario else "Custom"
+        print("\n")
+        print(f"  {scenario_name} + INTERTURN FAULT (segmented DAE)")
+        print(f"  Model: {machine.__class__.__name__}")
+        print(f"  Solver: {solver.describe()}")
+        print(f"  Source: {source.describe()}")
+        print(f"  Load: {load_torque.describe()}")
+        print(f"  Fault: {itf.name}")
+        print(f"  mu = {itf.mu:.4f}, R_f = {itf.R_f:.4g} Ohm")
+        print(f"  t = [{t_start:.2f}, {t_end:.2f}] s, "
+              f"t_fault = {t_fault:.4f} s")
+        print("\n")
+
+        # y0 для здорового режима: [i_A, i_B, i_C, i_2a, i_2b, i_2c, omega_r]
+        # = то же, что у базовой модели
+        y0 = y0_base.copy()
+
+        print("  Segment 1: healthy operation (segmented model)...")
+        t1, y1, ok1, msg1 = solver.solve(rhs_normal, y0, (t_start, t_fault))
+        if not ok1:
+            raise RuntimeError(f"Segment 1 solver failed: {msg1}")
+        print(f"  Segment 1 done. Points: {len(t1)}")
+
+        # ---- Переход к сегменту 2 ----
+        y_at_fault = y1[:, -1]   # [i_A, i_B, i_C, i_2a, i_2b, i_2c, omega_r]
+
+        # Расширяем: вставляем i_X2 = i_X (до замыкания сегменты несут одинаковый ток)
+        C_fault = machine.constraint_matrix_fault(itf.phase)
+        line_idx_f = machine.line_current_indices_fault(itf.phase)
+        idx_seg2 = machine.faulted_segment_index_in_ind(itf.phase)
+        idx_line_faulted = machine.line_current_index_of_faulted_phase(itf.phase)
+
+        # Строим y0_ext (8 элементов)
+        # В здоровом i_ind: [i_A, i_B, i_C, i_2a, i_2b, i_2c]
+        # В fault i_ind: [i_A1, i_A2, i_B, i_C, i_2a, i_2b, i_2c] (для фазы A)
+        # i_A1 = i_A, i_A2 = i_A (начальное условие)
+        n_ind_f = C_fault.shape[1]   # 7
+        state_size_f = n_ind_f + 1   # 8
+
+        y0_ext = np.zeros(state_size_f, dtype=float)
+
+        # Заполняем i_ind в fault-порядке
+        phase_idx = itf.phase_index
+        src_col = 0   # позиция в y_at_fault (healthy i_ind)
+        dst_col = 0   # позиция в y0_ext (fault i_ind)
+
+        for ph in range(3):
+            if ph == phase_idx:
+                # Замкнутая фаза: i_X1 = i_X, i_X2 = i_X
+                y0_ext[dst_col] = y_at_fault[src_col]       # i_X1
+                y0_ext[dst_col + 1] = y_at_fault[src_col]   # i_X2 = i_X
+                src_col += 1
+                dst_col += 2
+            else:
+                y0_ext[dst_col] = y_at_fault[src_col]
+                src_col += 1
+                dst_col += 1
+
+        # Ротор
+        for k in range(3):
+            y0_ext[dst_col] = y_at_fault[src_col]
+            src_col += 1
+            dst_col += 1
+
+        # omega_r
+        y0_ext[n_ind_f] = y_at_fault[6]   # omega_r (последний в y_at_fault)
+
+        # ---- Сегмент 2: МВЗ ----
+        motor_comp_f = SegmentedMotorComponent(
+            machine, Mc_func, C_fault, line_idx_f,
+        )
+        motor_comp_f.state_offset = 0
+        source_comp_f = SourceComponent(source)
+
+        assembler_f = SegmentedCircuitAssembler(
+            motor_comp_f, source_comp_f, fault=itf,
+        )
+
+        rhs_fault = assembler_f.build_ode_rhs(state_size=state_size_f)
+
+        print("  Segment 2: inter-turn fault (segmented model)...")
+        t2, y2, ok2, msg2 = solver.solve(rhs_fault, y0_ext, (t_fault, t_end))
+        if not ok2:
+            raise RuntimeError(f"Segment 2 solver failed: {msg2}")
+        print(f"  Segment 2 done. Points: {len(t2)}")
+
+        # ---- Объединение результатов ----
+        if len(t2) > 0 and len(t1) > 0 and abs(t2[0] - t1[-1]) < 1e-14:
+            t2 = t2[1:]
+            y2 = y2[:, 1:]
+
+        N1 = len(t1)
+        N2 = len(t2)
+        N_total = N1 + N2
+
+        t_merged = np.concatenate([t1, t2])
+
+        # Восстанавливаем базовые 7 переменных (i_A, i_B, i_C, i_2a, i_2b, i_2c, omega_r)
+        # из приведённых i_ind
+        y_base_merged = np.zeros((7, N_total), dtype=float)
+
+        # Сегмент 1: y1 уже в формате [i_A, i_B, i_C, i_2a, i_2b, i_2c, omega_r]
+        y_base_merged[:, :N1] = y1[0:7, :]
+
+        # Сегмент 2: нужно извлечь эквивалентные фазные токи
+        if N2 > 0:
+            for k in range(N2):
+                y2_k = y2[:, k]
+                i_ind_k = y2_k[0:n_ind_f]
+
+                # Восстанавливаем полный 9-вектор
+                i_full = C_fault @ i_ind_k
+
+                # Эквивалентные фазные токи
+                i_eq = machine._T_s @ i_full[0:6]
+
+                y_base_merged[0, N1 + k] = i_eq[0]    # i_A_eq
+                y_base_merged[1, N1 + k] = i_eq[1]    # i_B_eq
+                y_base_merged[2, N1 + k] = i_eq[2]    # i_C_eq
+                y_base_merged[3, N1 + k] = i_full[6]  # i_2a
+                y_base_merged[4, N1 + k] = i_full[7]  # i_2b
+                y_base_merged[5, N1 + k] = i_full[8]  # i_2c
+                y_base_merged[6, N1 + k] = y2_k[n_ind_f]  # omega_r
+
+        # Извлекаем токи сегментов для extra
+        i_line_faulted = np.zeros(N_total, dtype=float)
+        i_seg2_faulted = np.zeros(N_total, dtype=float)
+        i_fault_loop = np.zeros(N_total, dtype=float)
+
+        # Сегмент 1: i_line = i_seg2 (= i_фазы)
+        for k in range(N1):
+            i_ph = y1[phase_idx, k]
+            i_line_faulted[k] = i_ph
+            i_seg2_faulted[k] = i_ph
+            i_fault_loop[k] = 0.0
+
+        # Сегмент 2: извлекаем из fault i_ind
+        if N2 > 0:
+            for k in range(N2):
+                y2_k = y2[:, k]
+                i_line_X = y2_k[idx_line_faulted]
+                i_X2 = y2_k[idx_seg2]
+                i_line_faulted[N1 + k] = i_line_X
+                i_seg2_faulted[N1 + k] = i_X2
+                i_fault_loop[N1 + k] = i_line_X - i_X2
+
+        # Результаты
+        results = SimulationResults.from_solver_output(
+            t=t_merged,
+            y=y_base_merged,
+            params=params,
+            scenario_name=f"{scenario_name} + {itf.name}",
+            solver_name=solver.describe(),
+        )
+
+        results.extra["machine"] = machine
+        results.extra["machine_base"] = machine
+        results.extra["source"] = source
+        results.extra["load"] = load_torque
+        results.extra["interturn_fault"] = itf
+        results.extra["source_r_matrix"] = source_comp.R_src.copy()
+        results.extra["source_l_matrix"] = source_comp.L_src.copy()
+        results.extra["i_line_faulted"] = i_line_faulted
+        results.extra["i_seg2_faulted"] = i_seg2_faulted
+        results.extra["i_fault_loop"] = i_fault_loop
+        results.extra["t_fault"] = t_fault
+        results.extra["N_segment1"] = N1
+        results.extra["N_segment2"] = N2
+        results.extra["rhs_normal"] = rhs_normal
+        results.extra["rhs_fault"] = rhs_fault
+
+        print(f"\n  Total points: {N_total}")
+        print(f"\n{results.summary()}")
+        print("\n")
+
+        return results
 
     def _resolve_solver(self) -> Solver:
         """Возвращает решатель из аргумента или использует решатель по умолчанию."""
