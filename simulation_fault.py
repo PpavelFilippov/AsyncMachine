@@ -6,7 +6,7 @@
 """
 from __future__ import annotations
 
-from typing import Optional, Type
+from typing import Any, Callable, Optional, Type
 
 import numpy as np
 
@@ -34,14 +34,30 @@ class FaultSimulationBuilder:
 
         self._params = params or MachineParameters()
         self._model_cls: Type[MachineModel] = LinearInductionMachine
+        self._model_kwargs: dict[str, Any] = {}
+        self._model_factory: Optional[Callable[[MachineParameters], MachineModel]] = None
         self._solver: Optional[Solver] = None
         self._scenario: Optional[Scenario] = None
         self._solver_config: Optional[SolverConfig] = None
         self._fault: Optional[FaultDescriptor] = None
 
 
-    def model(self, model_cls: Type[MachineModel]) -> FaultSimulationBuilder:
+    def model(
+        self,
+        model_cls: Type[MachineModel],
+        **model_kwargs: Any,
+    ) -> FaultSimulationBuilder:
         self._model_cls = model_cls
+        self._model_kwargs = dict(model_kwargs)
+        self._model_factory = None
+        return self
+
+    def model_factory(
+        self,
+        factory: Callable[[MachineParameters], MachineModel],
+    ) -> FaultSimulationBuilder:
+        self._model_factory = factory
+        self._model_kwargs = {}
         return self
 
     def solver(self, solver: Solver) -> FaultSimulationBuilder:
@@ -95,7 +111,7 @@ class FaultSimulationBuilder:
         l_src_embed[0:3, 0:3] = l_src_mat
 
                                
-        machine_base = self._model_cls(params)
+        machine_base = self._build_model(params)
 
                                                            
         machine_sc = LinearInductionMachineSC(
@@ -235,6 +251,11 @@ class FaultSimulationBuilder:
         print("\n")
 
         return results
+
+    def _build_model(self, params: MachineParameters) -> MachineModel:
+        if self._model_factory is not None:
+            return self._model_factory(params)
+        return self._model_cls(params, **self._model_kwargs)
 
 
 def _validate_3x3(mat: np.ndarray, name: str) -> None:

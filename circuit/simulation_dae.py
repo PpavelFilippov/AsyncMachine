@@ -6,7 +6,7 @@
 """
 from __future__ import annotations
 
-from typing import Optional, Type
+from typing import Any, Callable, Optional, Type
 
 import numpy as np
 
@@ -44,6 +44,8 @@ class DAESimulationBuilder:
 
         self._params = params or MachineParameters()
         self._model_cls: Type[MachineModel] = LinearInductionMachine
+        self._model_kwargs: dict[str, Any] = {}
+        self._model_factory: Optional[Callable[[MachineParameters], MachineModel]] = None
         self._source: Optional[VoltageSource] = None
         self._faults: list[FaultDescriptor] = []
         self._interturn_fault: Optional[InterTurnFaultDescriptor] = None
@@ -55,8 +57,22 @@ class DAESimulationBuilder:
 
                                                                         
 
-    def model(self, model_cls: Type[MachineModel]) -> DAESimulationBuilder:
+    def model(
+        self,
+        model_cls: Type[MachineModel],
+        **model_kwargs: Any,
+    ) -> DAESimulationBuilder:
         self._model_cls = model_cls
+        self._model_kwargs = dict(model_kwargs)
+        self._model_factory = None
+        return self
+
+    def model_factory(
+        self,
+        factory: Callable[[MachineParameters], MachineModel],
+    ) -> DAESimulationBuilder:
+        self._model_factory = factory
+        self._model_kwargs = {}
         return self
 
     def source(self, source: VoltageSource) -> DAESimulationBuilder:
@@ -116,7 +132,7 @@ class DAESimulationBuilder:
         source, load_torque, y0, t_span = self._resolve_scenario(params)
         solver = self._resolve_solver()
 
-        machine = self._model_cls(params)
+        machine = self._build_model(params)
 
         def Mc_func(t: float, omega_r: float) -> float:
             """Возвращает момент нагрузки в момент времени t."""
@@ -191,7 +207,7 @@ class DAESimulationBuilder:
                 f"t_fault={t_fault} must be within t_span=({t_start}, {t_end})"
             )
 
-        machine = self._model_cls(params)
+        machine = self._build_model(params)
 
         def Mc_func(t: float, omega_r: float) -> float:
             """Возвращает момент нагрузки в момент времени t."""
@@ -568,3 +584,8 @@ class DAESimulationBuilder:
             t_span = self._t_span
 
         return source, load_torque, y0, t_span
+
+    def _build_model(self, params: MachineParameters) -> MachineModel:
+        if self._model_factory is not None:
+            return self._model_factory(params)
+        return self._model_cls(params, **self._model_kwargs)

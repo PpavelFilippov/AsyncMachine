@@ -6,7 +6,7 @@
 """
 from __future__ import annotations
 
-from typing import Optional, Type
+from typing import Any, Callable, Optional, Type
 
 import numpy as np
 
@@ -32,13 +32,29 @@ class SimulationBuilder:
 
         self._params = params or MachineParameters()
         self._model_cls: Type[MachineModel] = LinearInductionMachine
+        self._model_kwargs: dict[str, Any] = {}
+        self._model_factory: Optional[Callable[[MachineParameters], MachineModel]] = None
         self._solver: Optional[Solver] = None
         self._scenario: Optional[Scenario] = None
         self._solver_config: Optional[SolverConfig] = None
 
                 
-    def model(self, model_cls: Type[MachineModel]) -> SimulationBuilder:
+    def model(
+        self,
+        model_cls: Type[MachineModel],
+        **model_kwargs: Any,
+    ) -> SimulationBuilder:
         self._model_cls = model_cls
+        self._model_kwargs = dict(model_kwargs)
+        self._model_factory = None
+        return self
+
+    def model_factory(
+        self,
+        factory: Callable[[MachineParameters], MachineModel],
+    ) -> SimulationBuilder:
+        self._model_factory = factory
+        self._model_kwargs = {}
         return self
 
     def solver(self, solver: Solver) -> SimulationBuilder:
@@ -69,7 +85,7 @@ class SimulationBuilder:
         params = self._params
         scenario = self._scenario
 
-        machine = self._model_cls(params)
+        machine = self._build_model(params)
                                      
         y0 = scenario.initial_state(params)
         source = scenario.voltage_source(params)
@@ -167,6 +183,11 @@ class SimulationBuilder:
         print("\n")
 
         return results
+
+    def _build_model(self, params: MachineParameters) -> MachineModel:
+        if self._model_factory is not None:
+            return self._model_factory(params)
+        return self._model_cls(params, **self._model_kwargs)
 
     @staticmethod
     def _source_series_matrices(source) -> tuple[np.ndarray, np.ndarray]:
