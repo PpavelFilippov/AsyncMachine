@@ -2,16 +2,14 @@
     Модуль models/saturation.py.
     Состав:
     Классы: SaturationCharacteristic.
-    Функции: make_lm_saturation_law.
+    Функции: нет.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING
 
 import numpy as np
-
-from .parameter_laws import ElectricalLawInputs
 
 if TYPE_CHECKING:
     from core.parameters import MachineParameters
@@ -47,8 +45,14 @@ class SaturationCharacteristic:
 
     def __post_init__(self) -> None:
         k_at_1 = float(np.interp(1.0, self.i_oe_table, self.k_sat_table))
-        self._cal_factor = (self.K_sat_nominal - 1.0) / (k_at_1 - 1.0)
-        self._k_sat_calibrated = 1.0 + (self.k_sat_table - 1.0) * self._cal_factor
+        delta = k_at_1 - 1.0
+        if abs(delta) < 1e-12:
+            # Таблица без насыщения (Кн ≡ 1) — калибровка не требуется.
+            self._cal_factor = 0.0
+            self._k_sat_calibrated = self.k_sat_table.copy()
+        else:
+            self._cal_factor = (self.K_sat_nominal - 1.0) / delta
+            self._k_sat_calibrated = 1.0 + (self.k_sat_table - 1.0) * self._cal_factor
         self._Lm_unsat = self.Lm_nominal * self.K_sat_nominal
         self._Im_nominal_peak = self.Im_nominal * np.sqrt(2.0)
 
@@ -95,21 +99,3 @@ class SaturationCharacteristic:
         return self._Lm_unsat
 
 
-def make_lm_saturation_law(
-    saturation: SaturationCharacteristic,
-) -> Callable[[ElectricalLawInputs], float]:
-    """
-    Создаёт закон Lm для ElectricalParameterLaws, учитывающий насыщение.
-
-    Возвращаемый callable совместим с ElectricalParameterLaws.lm.
-    Значение inp.lm0 не используется — Lm вычисляется из SaturationCharacteristic.
-    """
-
-    def lm_saturated(inp: ElectricalLawInputs) -> float:
-        ctx = inp.context
-        imA = ctx.i1A + ctx.i2a
-        imB = ctx.i1B + ctx.i2b
-        imC = ctx.i1C + ctx.i2c
-        return saturation.compute_lm(imA, imB, imC)
-
-    return lm_saturated

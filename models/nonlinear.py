@@ -19,7 +19,9 @@ from .saturation import SaturationCharacteristic
 class NonlinearInductionMachine(MachineModel):
     """
     Модель асинхронной машины с динамическими параметрами Rs, Rr, Lm.
-    Законы параметров передаются через ElectricalParameterLaws.
+
+    Lm всегда вычисляется из SaturationCharacteristic (насыщение).
+    Rs, Rr — из ElectricalParameterLaws (температура и пр.).
     """
 
     def __init__(
@@ -40,11 +42,15 @@ class NonlinearInductionMachine(MachineModel):
         self.p = params.p
 
         self._laws = laws or ElectricalParameterLaws()
-        self._saturation = saturation
+        self._saturation = saturation or SaturationCharacteristic.from_params(params)
 
     @property
     def laws(self) -> ElectricalParameterLaws:
         return self._laws
+
+    @property
+    def saturation(self) -> SaturationCharacteristic:
+        return self._saturation
 
     def set_laws(self, laws: ElectricalParameterLaws) -> None:
         self._laws = laws
@@ -54,6 +60,7 @@ class NonlinearInductionMachine(MachineModel):
         t: float,
         y: np.ndarray,
     ) -> tuple[float, float, float]:
+        """Rs, Rr из laws (температура); Lm из saturation (насыщение)."""
         context = ElectricalLawContext(
             t=float(t),
             i1A=float(y[0]),
@@ -64,12 +71,16 @@ class NonlinearInductionMachine(MachineModel):
             i2c=float(y[5]),
             omega_r=float(y[6]),
         )
-        Rs, Rr, Lm = self._laws.evaluate(
+        Rs, Rr, _ = self._laws.evaluate(
             context=context,
             rs0=self._rs0,
             rr0=self._rr0,
             lm0=self._lm0,
         )
+        imA = float(y[0]) + float(y[3])
+        imB = float(y[1]) + float(y[4])
+        imC = float(y[2]) + float(y[5])
+        Lm = self._saturation.compute_lm(imA, imB, imC)
         return Rs, Rr, Lm
 
     def _build_inductance_matrix(self, Lm: float) -> np.ndarray:
@@ -139,18 +150,6 @@ class NonlinearInductionMachine(MachineModel):
             - (i1A * i2b + i1B * i2c + i1C * i2a)
         )
 
-    def _resolve_lm(
-        self,
-        i1A: float, i1B: float, i1C: float,
-        i2a: float, i2b: float, i2c: float,
-    ) -> float:
-        """Возвращает Lm с учётом насыщения (если задано)."""
-        if self._saturation is not None:
-            return self._saturation.compute_lm(
-                i1A + i2a, i1B + i2b, i1C + i2c,
-            )
-        return self._lm0
-
     def electromagnetic_torque(
         self,
         i1A: float,
@@ -161,7 +160,9 @@ class NonlinearInductionMachine(MachineModel):
         i2c: float,
     ) -> float:
         """Возвращает электромагнитный момент для интерфейса MachineModel."""
-        Lm = self._resolve_lm(i1A, i1B, i1C, i2a, i2b, i2c)
+        Lm = self._saturation.compute_lm(
+            i1A + i2a, i1B + i2b, i1C + i2c,
+        )
         return self._electromagnetic_torque_with_lm(
             self.p, Lm, i1A, i1B, i1C, i2a, i2b, i2c
         )
@@ -177,7 +178,9 @@ class NonlinearInductionMachine(MachineModel):
     ) -> float:
         """Возвращает потокосцепление фазы A для интерфейса MachineModel."""
 
-        Lm = self._resolve_lm(i1A, i1B, i1C, i2a, i2b, i2c)
+        Lm = self._saturation.compute_lm(
+            i1A + i2a, i1B + i2b, i1C + i2c,
+        )
         Mm = 2.0 * Lm / 3.0
         return (
             self.L1s * i1A
