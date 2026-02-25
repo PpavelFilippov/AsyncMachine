@@ -13,6 +13,7 @@ import numpy as np
 from core.parameters import MachineParameters
 from .base import MachineModel
 from .parameter_laws import ElectricalLawContext, ElectricalParameterLaws
+from .saturation import SaturationCharacteristic
 
 
 class NonlinearInductionMachine(MachineModel):
@@ -25,6 +26,7 @@ class NonlinearInductionMachine(MachineModel):
         self,
         params: MachineParameters,
         laws: ElectricalParameterLaws | None = None,
+        saturation: SaturationCharacteristic | None = None,
     ):
         super().__init__(params)
 
@@ -38,6 +40,7 @@ class NonlinearInductionMachine(MachineModel):
         self.p = params.p
 
         self._laws = laws or ElectricalParameterLaws()
+        self._saturation = saturation
 
     @property
     def laws(self) -> ElectricalParameterLaws:
@@ -136,6 +139,18 @@ class NonlinearInductionMachine(MachineModel):
             - (i1A * i2b + i1B * i2c + i1C * i2a)
         )
 
+    def _resolve_lm(
+        self,
+        i1A: float, i1B: float, i1C: float,
+        i2a: float, i2b: float, i2c: float,
+    ) -> float:
+        """Возвращает Lm с учётом насыщения (если задано)."""
+        if self._saturation is not None:
+            return self._saturation.compute_lm(
+                i1A + i2a, i1B + i2b, i1C + i2c,
+            )
+        return self._lm0
+
     def electromagnetic_torque(
         self,
         i1A: float,
@@ -146,8 +161,9 @@ class NonlinearInductionMachine(MachineModel):
         i2c: float,
     ) -> float:
         """Возвращает электромагнитный момент для интерфейса MachineModel."""
+        Lm = self._resolve_lm(i1A, i1B, i1C, i2a, i2b, i2c)
         return self._electromagnetic_torque_with_lm(
-            self.p, self._lm0, i1A, i1B, i1C, i2a, i2b, i2c
+            self.p, Lm, i1A, i1B, i1C, i2a, i2b, i2c
         )
 
     def flux_linkage_phaseA(
@@ -161,7 +177,8 @@ class NonlinearInductionMachine(MachineModel):
     ) -> float:
         """Возвращает потокосцепление фазы A для интерфейса MachineModel."""
 
-        Mm = 2.0 * self._lm0 / 3.0
+        Lm = self._resolve_lm(i1A, i1B, i1C, i2a, i2b, i2c)
+        Mm = 2.0 * Lm / 3.0
         return (
             self.L1s * i1A
             + Mm * (i1A - (i1B + i1C) / 2.0)

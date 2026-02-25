@@ -7,6 +7,10 @@ from models.parameter_laws import (
     ElectricalParameterLaws,
     PiecewiseConstantTemperatureProfile,
 )
+from models.saturation import (
+    SaturationCharacteristic,
+    make_lm_saturation_law,
+)
 
 __all__ = [
     "MachineModel",
@@ -16,4 +20,6 @@ __all__ = [
     "ElectricalLawInputs",
     "ElectricalParameterLaws",
     "PiecewiseConstantTemperatureProfile",
+    "SaturationCharacteristic",
+    "make_lm_saturation_law",
 ]
