@@ -291,6 +291,245 @@ def run_comparison(params, solver_cfg, output_dir):
 
 
 # ---------------------------------------------------------------------------
+#  Часть 3: осциллограмма i1A нелинейной модели
+# ---------------------------------------------------------------------------
+
+def plot_nonlinear_waveform(
+    res_nl: SimulationResults,
+    title: str,
+    save_path: str,
+    t_window: float = 0.1,
+) -> None:
+    """Строит осциллограмму i1A нелинейной модели (последние t_window секунд)."""
+
+    t = res_nl.t
+    t_start = max(0.0, t[-1] - t_window)
+    mask = t >= t_start
+    tt = (t[mask] - t[mask][0]) * 1000.0  # мс
+
+    fig, ax = plt.subplots(1, 1, figsize=(12, 5))
+    fig.suptitle(title, fontsize=13, fontweight="bold")
+
+    ax.plot(tt, res_nl.i1A[mask], "b-", lw=0.8)
+    ax.set(
+        xlabel="Время, мс",
+        ylabel="Ток, А",
+        title=f"Ток фазы A статора i₁A (последние {t_window * 1000:.0f} мс)",
+    )
+    ax.axhline(y=0, color="k", lw=0.3)
+
+    plt.tight_layout(rect=[0, 0, 1, 0.93])
+    fig.savefig(save_path, dpi=200, bbox_inches="tight")
+    print(f"  Сохранено: {save_path}")
+    plt.close(fig)
+
+
+def run_waveforms(params, solver_cfg, output_dir):
+    """Часть 3: осциллограммы i1A нелинейной модели."""
+    print("\n" + "=" * 70)
+    print("  ЧАСТЬ 3: ОСЦИЛЛОГРАММА i1A (Nonlinear)")
+    print("=" * 70)
+
+    scenarios = [
+        (
+            "No-Load",
+            MotorNoLoadScenario(t_end=2.0),
+            os.path.join(output_dir, "test_noload_waveform.png"),
+        ),
+        (
+            "Step-Load",
+            MotorStepLoadScenario(t_end=3.0, t_step=1.5),
+            os.path.join(output_dir, "test_step_waveform.png"),
+        ),
+    ]
+
+    for name, scenario, save_path in scenarios:
+        print(f"\n  --- Сценарий: {name} ---")
+        res_nl = run_nonlinear(params, scenario, solver_cfg)
+        plot_nonlinear_waveform(
+            res_nl,
+            title=f"Nonlinear (насыщение Lm) — {scenario.name()}",
+            save_path=save_path,
+        )
+
+
+# ---------------------------------------------------------------------------
+#  Часть 4: гармонический анализ тока статора (установившийся режим)
+# ---------------------------------------------------------------------------
+
+def harmonic_analysis(
+    signal: np.ndarray,
+    dt: float,
+    f_fund: float = 50.0,
+) -> tuple[np.ndarray, np.ndarray, float]:
+    """
+    Гармонический анализ сигнала.
+
+    Берёт целое число периодов основной частоты для чистого БПФ.
+
+    Возвращает:
+        freqs   — массив частот (Гц)
+        amps    — амплитуды (А, пиковые)
+        thd     — THD (%), отношение суммы высших гармоник к основной
+    """
+    T_period = 1.0 / f_fund
+    samples_per_period = int(round(T_period / dt))
+    n_periods = len(signal) // samples_per_period
+    if n_periods < 1:
+        raise ValueError("Недостаточно данных для одного полного периода.")
+
+    # Обрезаем до целого числа периодов (с конца сигнала)
+    N = n_periods * samples_per_period
+    seg = signal[-N:]
+
+    # БПФ
+    spectrum = np.fft.rfft(seg)
+    freqs = np.fft.rfftfreq(N, d=dt)
+    amps = 2.0 * np.abs(spectrum) / N
+    amps[0] *= 0.5  # DC-компонента без удвоения
+
+    # THD: корень из суммы квадратов высших гармоник / амплитуда основной
+    idx_fund = int(round(f_fund * N * dt))
+    a_fund = amps[idx_fund]
+    # Берём гармоники: 2*f_fund, 3*f_fund, ... до Найквиста
+    harmonics_sq = 0.0
+    for h in range(2, 50):
+        idx_h = int(round(h * f_fund * N * dt))
+        if idx_h >= len(amps):
+            break
+        harmonics_sq += amps[idx_h] ** 2
+    thd = np.sqrt(harmonics_sq) / a_fund * 100.0 if a_fund > 1e-12 else 0.0
+
+    return freqs, amps, thd
+
+
+def plot_harmonics(
+    res_lin: SimulationResults,
+    res_nl: SimulationResults,
+    title: str,
+    save_path: str,
+    n_harmonics: int = 20,
+) -> None:
+    """
+    Строит:
+      верх — осциллограммы i1A (последние 100 мс) linear vs nonlinear
+      низ  — гармонический спектр (столбцы) до n-й гармоники
+    """
+    dt = res_lin.t[1] - res_lin.t[0]
+    f_fund = res_lin.params.fn
+
+    # Установившийся участок
+    ss_lin = res_lin.steady_state_slice()
+    ss_nl = res_nl.steady_state_slice()
+
+    freqs_l, amps_l, thd_l = harmonic_analysis(res_lin.i1A[ss_lin], dt, f_fund)
+    freqs_n, amps_n, thd_n = harmonic_analysis(res_nl.i1A[ss_nl], dt, f_fund)
+
+    # Извлекаем амплитуды гармоник 1..n_harmonics
+    harm_nums = np.arange(1, n_harmonics + 1)
+    a_lin = np.zeros(n_harmonics)
+    a_nl = np.zeros(n_harmonics)
+
+    N_lin = len(res_lin.i1A[ss_lin])
+    samples_per_period_lin = int(round(1.0 / (f_fund * dt)))
+    N_fft_lin = (N_lin // samples_per_period_lin) * samples_per_period_lin
+
+    N_nl = len(res_nl.i1A[ss_nl])
+    N_fft_nl = (N_nl // samples_per_period_lin) * samples_per_period_lin
+
+    for i, h in enumerate(harm_nums):
+        idx_l = int(round(h * f_fund * N_fft_lin * dt))
+        idx_n = int(round(h * f_fund * N_fft_nl * dt))
+        if idx_l < len(amps_l):
+            a_lin[i] = amps_l[idx_l]
+        if idx_n < len(amps_n):
+            a_nl[i] = amps_n[idx_n]
+
+    # --- Графики ---
+    fig, axes = plt.subplots(2, 1, figsize=(14, 10))
+    fig.suptitle(title, fontsize=13, fontweight="bold")
+
+    # Верх: осциллограмма (последние 100 мс)
+    t_window = 0.1
+    t_start_l = max(0, res_lin.t[-1] - t_window)
+    mask_l = res_lin.t >= t_start_l
+    t_start_n = max(0, res_nl.t[-1] - t_window)
+    mask_n = res_nl.t >= t_start_n
+
+    tt_l = (res_lin.t[mask_l] - res_lin.t[mask_l][0]) * 1000
+    tt_n = (res_nl.t[mask_n] - res_nl.t[mask_n][0]) * 1000
+
+    axes[0].plot(tt_l, res_lin.i1A[mask_l], "b-", lw=0.8, label="Linear")
+    axes[0].plot(tt_n, res_nl.i1A[mask_n], "r-", lw=0.8, alpha=0.7, label="Nonlinear (насыщ.)")
+    axes[0].set(
+        xlabel="Время, мс",
+        ylabel="Ток, А",
+        title="Ток фазы A статора i₁A (последние 100 мс, уст. режим)",
+    )
+    axes[0].axhline(y=0, color="k", lw=0.3)
+    axes[0].legend(fontsize=9)
+
+    # Низ: столбчатый спектр гармоник
+    bar_w = 0.35
+    x = harm_nums
+    axes[1].bar(x - bar_w / 2, a_lin, bar_w, color="steelblue", label=f"Linear (THD={thd_l:.2f}%)")
+    axes[1].bar(x + bar_w / 2, a_nl, bar_w, color="indianred", label=f"Nonlinear (THD={thd_n:.2f}%)")
+    axes[1].set(
+        xlabel="Номер гармоники",
+        ylabel="Амплитуда, А",
+        title="Гармонический спектр тока i₁A (установившийся режим)",
+    )
+    axes[1].set_xticks(harm_nums)
+    axes[1].set_xticklabels([str(h) for h in harm_nums], fontsize=8)
+    axes[1].legend(fontsize=9)
+
+    # Аннотация с амплитудами основных гармоник
+    print(f"\n    {'Гармоника':<12} {'Linear, А':>12} {'Nonlinear, А':>12}")
+    print(f"    {'-' * 36}")
+    for i, h in enumerate(harm_nums):
+        if a_lin[i] > 0.1 or a_nl[i] > 0.1:
+            print(f"    {h:<12d} {a_lin[i]:>12.2f} {a_nl[i]:>12.2f}")
+    print(f"    {'THD, %':<12} {thd_l:>12.2f} {thd_n:>12.2f}")
+
+    plt.tight_layout(rect=[0, 0, 1, 0.94])
+    fig.savefig(save_path, dpi=200, bbox_inches="tight")
+    print(f"  Сохранено: {save_path}")
+    plt.close(fig)
+
+
+def run_harmonics(params, solver_cfg, output_dir):
+    """Часть 4: гармонический анализ тока."""
+    print("\n" + "=" * 70)
+    print("  ЧАСТЬ 4: ГАРМОНИЧЕСКИЙ АНАЛИЗ ТОКА i1A (уст. режим)")
+    print("=" * 70)
+
+    sat = SaturationCharacteristic.from_params(params)
+
+    scenarios = [
+        (
+            "No-Load",
+            MotorNoLoadScenario(t_end=2.0),
+            os.path.join(output_dir, "test_noload_harmonics.png"),
+        ),
+        (
+            "Step-Load",
+            MotorStepLoadScenario(t_end=3.0, t_step=1.5),
+            os.path.join(output_dir, "test_step_harmonics.png"),
+        ),
+    ]
+
+    for name, scenario, save_path in scenarios:
+        print(f"\n  --- Сценарий: {name} ---")
+        res_lin = run_linear(params, scenario, solver_cfg)
+        res_nl = run_nonlinear(params, scenario, solver_cfg, sat)
+        plot_harmonics(
+            res_lin, res_nl,
+            title=f"Гармонический анализ i₁A — {scenario.name()}\nLinear vs Nonlinear (насыщение Lm)",
+            save_path=save_path,
+        )
+
+
+# ---------------------------------------------------------------------------
 #  main
 # ---------------------------------------------------------------------------
 
@@ -313,6 +552,12 @@ def main() -> None:
 
     # Часть 2
     run_comparison(params, solver_cfg, output_dir)
+
+    # Часть 3
+    run_waveforms(params, solver_cfg, output_dir)
+
+    # Часть 4
+    run_harmonics(params, solver_cfg, output_dir)
 
     print(f"\n  Графики сохранены в: {output_dir}/")
     for f_name in sorted(os.listdir(output_dir)):
