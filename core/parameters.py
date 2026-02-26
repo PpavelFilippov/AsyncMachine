@@ -32,8 +32,6 @@ class MachineParameters:
     R2: float = 0.02017                                                    
     L2sigma: float = 0.000476                                                                 
     Lm: float = 0.017911
-    Im_nominal: float = 57.25
-    K_sat_nominal: float = 1.263
 
     J: float = 2.875                                           
 

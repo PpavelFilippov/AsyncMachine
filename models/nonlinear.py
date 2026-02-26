@@ -1,9 +1,4 @@
-"""
-    Модуль models/nonlinear.py.
-    Состав:
-    Классы: NonlinearInductionMachine.
-    Функции: нет.
-"""
+"""Nonlinear induction machine model with variable stator/rotor resistances."""
 from __future__ import annotations
 
 from typing import Callable
@@ -13,44 +8,32 @@ import numpy as np
 from core.parameters import MachineParameters
 from .base import MachineModel
 from .parameter_laws import ElectricalLawContext, ElectricalParameterLaws
-from .saturation import SaturationCharacteristic
 
 
 class NonlinearInductionMachine(MachineModel):
-    """
-    Модель асинхронной машины с динамическими параметрами Rs, Rr, Lm.
-
-    Lm всегда вычисляется из SaturationCharacteristic (насыщение).
-    Rs, Rr — из ElectricalParameterLaws (температура и пр.).
-    """
+    """Asynchronous machine model with dynamic Rs/Rr and constant Lm."""
 
     def __init__(
         self,
         params: MachineParameters,
         laws: ElectricalParameterLaws | None = None,
-        saturation: SaturationCharacteristic | None = None,
     ):
         super().__init__(params)
 
         self._rs0 = params.R1
         self._rr0 = params.R2
-        self._lm0 = params.Lm
 
+        self.Lm = params.Lm
         self.L1s = params.L1sigma
         self.L2s = params.L2sigma
         self.J = params.J
         self.p = params.p
 
         self._laws = laws or ElectricalParameterLaws()
-        self._saturation = saturation or SaturationCharacteristic.from_params(params)
 
     @property
     def laws(self) -> ElectricalParameterLaws:
         return self._laws
-
-    @property
-    def saturation(self) -> SaturationCharacteristic:
-        return self._saturation
 
     def set_laws(self, laws: ElectricalParameterLaws) -> None:
         self._laws = laws
@@ -59,8 +42,7 @@ class NonlinearInductionMachine(MachineModel):
         self,
         t: float,
         y: np.ndarray,
-    ) -> tuple[float, float, float]:
-        """Rs, Rr из laws (температура); Lm из saturation (насыщение)."""
+    ) -> tuple[float, float]:
         context = ElectricalLawContext(
             t=float(t),
             i1A=float(y[0]),
@@ -71,46 +53,38 @@ class NonlinearInductionMachine(MachineModel):
             i2c=float(y[5]),
             omega_r=float(y[6]),
         )
-        Rs, Rr, _ = self._laws.evaluate(
+        return self._laws.evaluate(
             context=context,
             rs0=self._rs0,
             rr0=self._rr0,
-            lm0=self._lm0,
         )
-        imA = float(y[0]) + float(y[3])
-        imB = float(y[1]) + float(y[4])
-        imC = float(y[2]) + float(y[5])
-        Lm = self._saturation.compute_lm(imA, imB, imC)
-        return Rs, Rr, Lm
 
-    def _build_inductance_matrix(self, Lm: float) -> np.ndarray:
-        """Строит матрицу индуктивностей статора/ротора для текущего Lm."""
+    def _build_inductance_matrix(self) -> np.ndarray:
+        mm = 2.0 * self.Lm / 3.0
+        m_off = -0.5 * mm
 
-        Mm = 2.0 * Lm / 3.0
-        m_off = -0.5 * Mm
+        l1_diag = self.L1s + mm
+        l2_diag = self.L2s + mm
 
-        L1_diag = self.L1s + Mm
-        L2_diag = self.L2s + Mm
-
-        Lss = np.array([
-            [L1_diag, m_off, m_off],
-            [m_off, L1_diag, m_off],
-            [m_off, m_off, L1_diag],
+        lss = np.array([
+            [l1_diag, m_off, m_off],
+            [m_off, l1_diag, m_off],
+            [m_off, m_off, l1_diag],
         ])
-        Lrr = np.array([
-            [L2_diag, m_off, m_off],
-            [m_off, L2_diag, m_off],
-            [m_off, m_off, L2_diag],
+        lrr = np.array([
+            [l2_diag, m_off, m_off],
+            [m_off, l2_diag, m_off],
+            [m_off, m_off, l2_diag],
         ])
-        Lsr = np.array([
-            [Mm, m_off, m_off],
-            [m_off, Mm, m_off],
-            [m_off, m_off, Mm],
+        lsr = np.array([
+            [mm, m_off, m_off],
+            [m_off, mm, m_off],
+            [m_off, m_off, mm],
         ])
 
         return np.block([
-            [Lss, Lsr],
-            [Lsr, Lrr],
+            [lss, lsr],
+            [lsr, lrr],
         ])
 
     def _rotor_emf(
@@ -122,22 +96,19 @@ class NonlinearInductionMachine(MachineModel):
         imB: float,
         imC: float,
         omega_mech: float,
-        Lm: float,
     ) -> np.ndarray:
-        """Вычисляет ЭДС ротора."""
-
         omega_e = omega_mech * self.p
         inv_sqrt3 = 1.0 / np.sqrt(3)
 
-        Ea = omega_e * inv_sqrt3 * (self.L2s * (i2b - i2c) + Lm * (imB - imC))
-        Eb = omega_e * inv_sqrt3 * (self.L2s * (i2c - i2a) + Lm * (imC - imA))
-        Ec = omega_e * inv_sqrt3 * (self.L2s * (i2a - i2b) + Lm * (imA - imB))
-        return np.array([Ea, Eb, Ec])
+        ea = omega_e * inv_sqrt3 * (self.L2s * (i2b - i2c) + self.Lm * (imB - imC))
+        eb = omega_e * inv_sqrt3 * (self.L2s * (i2c - i2a) + self.Lm * (imC - imA))
+        ec = omega_e * inv_sqrt3 * (self.L2s * (i2a - i2b) + self.Lm * (imA - imB))
+        return np.array([ea, eb, ec])
 
     @staticmethod
     def _electromagnetic_torque_with_lm(
         p: int,
-        Lm: float,
+        lm: float,
         i1A: float,
         i1B: float,
         i1C: float,
@@ -145,7 +116,7 @@ class NonlinearInductionMachine(MachineModel):
         i2b: float,
         i2c: float,
     ) -> float:
-        return (p * Lm / np.sqrt(3)) * (
+        return (p * lm / np.sqrt(3.0)) * (
             (i1A * i2c + i1B * i2a + i1C * i2b)
             - (i1A * i2b + i1B * i2c + i1C * i2a)
         )
@@ -159,12 +130,8 @@ class NonlinearInductionMachine(MachineModel):
         i2b: float,
         i2c: float,
     ) -> float:
-        """Возвращает электромагнитный момент для интерфейса MachineModel."""
-        Lm = self._saturation.compute_lm(
-            i1A + i2a, i1B + i2b, i1C + i2c,
-        )
         return self._electromagnetic_torque_with_lm(
-            self.p, Lm, i1A, i1B, i1C, i2a, i2b, i2c
+            self.p, self.Lm, i1A, i1B, i1C, i2a, i2b, i2c
         )
 
     def flux_linkage_phaseA(
@@ -176,16 +143,11 @@ class NonlinearInductionMachine(MachineModel):
         i2b: float,
         i2c: float,
     ) -> float:
-        """Возвращает потокосцепление фазы A для интерфейса MachineModel."""
-
-        Lm = self._saturation.compute_lm(
-            i1A + i2a, i1B + i2b, i1C + i2c,
-        )
-        Mm = 2.0 * Lm / 3.0
+        mm = 2.0 * self.Lm / 3.0
         return (
             self.L1s * i1A
-            + Mm * (i1A - (i1B + i1C) / 2.0)
-            + Mm * (i2a - (i2b + i2c) / 2.0)
+            + mm * (i1A - (i1B + i1C) / 2.0)
+            + mm * (i2a - (i2b + i2c) / 2.0)
         )
 
     def electrical_matrices(
@@ -193,10 +155,8 @@ class NonlinearInductionMachine(MachineModel):
         t: float,
         y: np.ndarray,
     ) -> tuple[np.ndarray, np.ndarray]:
-        """Формирует матрицу и правую часть электрической подсистемы."""
-
-        Rs, Rr, Lm = self._electrical_params(t, y)
-        L = self._build_inductance_matrix(Lm)
+        rs, rr = self._electrical_params(t, y)
+        l = self._build_inductance_matrix()
 
         i1A, i1B, i1C = y[0], y[1], y[2]
         i2a, i2b, i2c = y[3], y[4], y[5]
@@ -205,17 +165,17 @@ class NonlinearInductionMachine(MachineModel):
         imA = i1A + i2a
         imB = i1B + i2b
         imC = i1C + i2c
-        E_rot = self._rotor_emf(i2a, i2b, i2c, imA, imB, imC, omega_r, Lm)
+        e_rot = self._rotor_emf(i2a, i2b, i2c, imA, imB, imC, omega_r)
 
         b0 = np.array([
-            -Rs * i1A,
-            -Rs * i1B,
-            -Rs * i1C,
-            -Rr * i2a - E_rot[0],
-            -Rr * i2b - E_rot[1],
-            -Rr * i2c - E_rot[2],
+            -rs * i1A,
+            -rs * i1B,
+            -rs * i1C,
+            -rr * i2a - e_rot[0],
+            -rr * i2b - e_rot[1],
+            -rr * i2c - e_rot[2],
         ])
-        return L, b0
+        return l, b0
 
     def mechanical_rhs(
         self,
@@ -223,15 +183,13 @@ class NonlinearInductionMachine(MachineModel):
         y: np.ndarray,
         Mc: float,
     ) -> float:
-        """Вычисляет производную механической скорости."""
-
-        _, _, Lm = self._electrical_params(t, y)
+        _ = t
         i1A, i1B, i1C = y[0], y[1], y[2]
         i2a, i2b, i2c = y[3], y[4], y[5]
-        Mem = self._electromagnetic_torque_with_lm(
-            self.p, Lm, i1A, i1B, i1C, i2a, i2b, i2c
+        mem = self._electromagnetic_torque_with_lm(
+            self.p, self.Lm, i1A, i1B, i1C, i2a, i2b, i2c
         )
-        return (Mem - Mc) / self.J
+        return (mem - Mc) / self.J
 
     def ode_rhs(
         self,
@@ -240,16 +198,14 @@ class NonlinearInductionMachine(MachineModel):
         Mc_func: Callable[[float, float], float],
         U_func: Callable[[float], np.ndarray],
     ) -> np.ndarray:
-        """Вычисляет правую часть системы ОДУ."""
-
-        Us = U_func(t)
-        L, b0 = self.electrical_matrices(t, y)
+        us = U_func(t)
+        l, b0 = self.electrical_matrices(t, y)
         b = b0.copy()
-        b[0:3] += Us
-        di_dt = np.linalg.solve(L, b)
+        b[0:3] += us
+        di_dt = np.linalg.solve(l, b)
 
-        Mc = Mc_func(t, y[6])
-        domega_dt = self.mechanical_rhs(t, y, Mc)
+        mc = Mc_func(t, y[6])
+        domega_dt = self.mechanical_rhs(t, y, mc)
 
         dydt = np.empty(7)
         dydt[0:6] = di_dt

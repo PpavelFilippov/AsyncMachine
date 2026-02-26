@@ -1,13 +1,4 @@
-"""
-Модуль models/parameter_laws.py.
-
-Инфраструктура для временных законов электрических параметров:
-- кусочно-постоянный профиль температуры T(t) по временной сетке t
-- профиль намагничивания L_profile(t)
-- Rs(t, ...)
-- Rr(t, ...)
-- Lm(t, ...)
-"""
+"""Infrastructure for dynamic stator/rotor resistance laws."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -18,7 +9,7 @@ import numpy as np
 
 @dataclass(frozen=True)
 class ElectricalLawContext:
-    """Контекст мгновенного состояния модели для слоя законов параметров."""
+    """Instant model state passed into law callables."""
 
     t: float
     i1A: float
@@ -32,14 +23,12 @@ class ElectricalLawContext:
 
 @dataclass(frozen=True)
 class ElectricalLawInputs:
-    """Набор входных данных для законов Rs/Rr/Lm."""
+    """Inputs for stator and rotor resistance laws."""
 
     context: ElectricalLawContext
     rs0: float
     rr0: float
-    lm0: float
     temperature: float
-    l_profile: float
 
     @property
     def t(self) -> float:
@@ -82,10 +71,6 @@ def _constant_temperature(_: ElectricalLawContext) -> float:
     return 25.0
 
 
-def _constant_profile(_: ElectricalLawContext) -> float:
-    return 1.0
-
-
 def _rs_constant(inp: ElectricalLawInputs) -> float:
     return inp.rs0
 
@@ -94,19 +79,9 @@ def _rr_constant(inp: ElectricalLawInputs) -> float:
     return inp.rr0
 
 
-def _lm_constant(inp: ElectricalLawInputs) -> float:
-    return inp.lm0
-
-
 @dataclass
 class PiecewiseConstantTemperatureProfile:
-    """
-    Кусочно-постоянный профиль температуры по временной сетке t.
-
-    Сетка t определяет [t_start, t_end].
-    Этот диапазон делится на N равных по времени интервалов, где
-    N = len(temperature_values). На каждом интервале температура постоянна.
-    """
+    """Piecewise-constant temperature profile on the provided time span."""
 
     t: np.ndarray
     temperature_values: np.ndarray
@@ -135,17 +110,11 @@ class PiecewiseConstantTemperatureProfile:
 
 @dataclass
 class ElectricalParameterLaws:
-    """
-    Стратегия с подменяемыми законами.
-
-    Для подключения реальных зависимостей подмените callables своими функциями.
-    """
+    """Container for pluggable stator/rotor resistance laws."""
 
     temperature: ProfileFunction = _constant_temperature
-    l_profile: ProfileFunction = _constant_profile
     rs: ParameterFunction = _rs_constant
     rr: ParameterFunction = _rr_constant
-    lm: ParameterFunction = _lm_constant
 
     def evaluate(
         self,
@@ -153,19 +122,14 @@ class ElectricalParameterLaws:
         context: ElectricalLawContext,
         rs0: float,
         rr0: float,
-        lm0: float,
-    ) -> tuple[float, float, float]:
+    ) -> tuple[float, float]:
         temperature = float(self.temperature(context))
-        l_profile = float(self.l_profile(context))
         inputs = ElectricalLawInputs(
             context=context,
             rs0=float(rs0),
             rr0=float(rr0),
-            lm0=float(lm0),
             temperature=temperature,
-            l_profile=l_profile,
         )
         rs = float(self.rs(inputs))
         rr = float(self.rr(inputs))
-        lm = float(self.lm(inputs))
-        return rs, rr, lm
+        return rs, rr

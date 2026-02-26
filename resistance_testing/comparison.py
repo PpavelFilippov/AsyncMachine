@@ -148,11 +148,8 @@ def build_constant_temperature_laws(
     alpha: float = ALPHA_CU,
 ) -> ElectricalParameterLaws:
     def temperature_placeholder(_: ElectricalLawContext) -> float:
-        # Not used directly in Rs/Rr laws here, but kept for interface completeness.
+        # Kept for compatibility with the common law context.
         return stator_temp_c
-
-    def l_profile(_: ElectricalLawContext) -> float:
-        return 1.0
 
     def rs_law(inp: ElectricalLawInputs) -> float:
         return inp.rs0 * (1.0 + alpha * (stator_temp_c - T_REF))
@@ -160,16 +157,10 @@ def build_constant_temperature_laws(
     def rr_law(inp: ElectricalLawInputs) -> float:
         return inp.rr0 * (1.0 + alpha * (rotor_temp_c - T_REF))
 
-    def lm_law(inp: ElectricalLawInputs) -> float:
-        _ = inp.l_profile, inp.temperature
-        return inp.lm0
-
     return ElectricalParameterLaws(
         temperature=temperature_placeholder,
-        l_profile=l_profile,
         rs=rs_law,
         rr=rr_law,
-        lm=lm_law,
     )
 
 
