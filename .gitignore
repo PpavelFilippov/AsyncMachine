@@ -10,4 +10,3 @@ env/
 .idea/
 __pycache__/
 *.pyc
-claude/
