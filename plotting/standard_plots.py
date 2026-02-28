@@ -390,6 +390,117 @@ def plot_waveforms(res: SimulationResults, save_path: Optional[str] = None):
     return fig
 
 
+def _half_period_envelope(signal: np.ndarray, dt: float, fn: float) -> np.ndarray:
+    """Вычисляет огибающую амплитуды за каждый полупериод."""
+
+    half_n = max(1, int(round(0.5 / fn / dt)))
+    env = np.empty_like(signal)
+    for i in range(len(signal)):
+        lo = max(0, i - half_n)
+        hi = min(len(signal), i + half_n + 1)
+        env[i] = np.max(np.abs(signal[lo:hi]))
+    return env
+
+
+def _amplitude_spectrum(signal: np.ndarray, dt: float) -> tuple[np.ndarray, np.ndarray]:
+    """Вычисляет односторонний амплитудный спектр с окном Ханна."""
+
+    N = len(signal)
+    win = np.hanning(N)
+    scale = 2.0 / win.sum()
+    spectrum = np.abs(np.fft.rfft(signal * win)) * scale
+    freqs = np.fft.rfftfreq(N, d=dt)
+    return freqs, spectrum
+
+
+def plot_phase_ab_zoom(
+    res: SimulationResults,
+    t_step: Optional[float] = None,
+    save_path: Optional[str] = None,
+):
+    """Строит токи фаз A и B + спектр в трёх временных окнах по 10 периодов."""
+
+    t = res.t
+    fn = res.params.fn
+    window = 10.0 / fn
+    dt = t[1] - t[0] if len(t) > 1 else 1e-4
+
+    t1_s, t1_e = 0.0, window
+
+    if t_step is not None:
+        t2_s = max(0.0, t_step - window / 2)
+        t2_e = t2_s + window
+        label2 = f'Скачок ({t2_s * 1000:.0f}\u2026{t2_e * 1000:.0f} мс)'
+    else:
+        t_mid = (t[0] + t[-1]) / 2.0
+        t2_s = t_mid - window / 2
+        t2_e = t_mid + window / 2
+        label2 = f'Середина ({t2_s * 1000:.0f}\u2026{t2_e * 1000:.0f} мс)'
+
+    t3_e = t[-1]
+    t3_s = t3_e - window
+
+    masks = [
+        (t >= t1_s) & (t <= t1_e),
+        (t >= t2_s) & (t <= t2_e),
+        (t >= t3_s) & (t <= t3_e),
+    ]
+    titles_t = [
+        f'Пуск ({t1_s * 1000:.0f}\u2026{t1_e * 1000:.0f} мс)',
+        label2,
+        f'Уст. режим ({t3_s * 1000:.0f}\u2026{t3_e * 1000:.0f} мс)',
+    ]
+
+    env_A = _half_period_envelope(res.i1A, dt, fn)
+    env_B = _half_period_envelope(res.i1B, dt, fn)
+
+    i1_mod = _current_module(res.i1A, res.i1B, res.i1C)
+
+    fig, axes = plt.subplots(3, 2, figsize=(18, 14))
+    fig.suptitle(f'Токи фаз A и B: осциллограммы и спектр\n({res.scenario_name})',
+                 fontsize=13, fontweight='bold')
+
+    f_max = 500.0
+
+    for row, (mask, title) in enumerate(zip(masks, titles_t)):
+        tt = t[mask] * 1000
+        i1A_w = res.i1A[mask]
+        i1B_w = res.i1B[mask]
+        i1mod_w = i1_mod[mask]
+
+        ax_t = axes[row, 0]
+        ax_t.plot(tt, i1A_w, 'b-', lw=0.5, alpha=0.5, label='i1A')
+        ax_t.plot(tt, i1B_w, 'r-', lw=0.5, alpha=0.5, label='i1B')
+        ax_t.plot(tt, env_A[mask], 'b-', lw=1.5, label='|i1A| огиб.')
+        ax_t.plot(tt, -env_A[mask], 'b-', lw=1.5)
+        ax_t.plot(tt, env_B[mask], 'r--', lw=1.5, label='|i1B| огиб.')
+        ax_t.plot(tt, -env_B[mask], 'r--', lw=1.5)
+        ax_t.set(xlabel='Время, мс', ylabel='Ток, А', title=title)
+        ax_t.legend(fontsize=7, loc='upper right')
+
+        ax_f = axes[row, 1]
+        freqs_A, spec_A = _amplitude_spectrum(i1A_w, dt)
+        freqs_B, spec_B = _amplitude_spectrum(i1B_w, dt)
+        freqs_m, spec_m = _amplitude_spectrum(i1mod_w, dt)
+
+        f_mask = freqs_A <= f_max
+        ax_f.semilogy(freqs_A[f_mask], spec_A[f_mask], 'b-', lw=1.0, label='i1A')
+        ax_f.semilogy(freqs_B[f_mask], spec_B[f_mask], 'r-', lw=1.0, label='i1B')
+        ax_f.semilogy(freqs_m[f_mask], spec_m[f_mask], 'k--', lw=1.0, alpha=0.7, label='|I1|')
+
+        for harm in range(1, int(f_max / fn) + 1):
+            ax_f.axvline(x=harm * fn, color='gray', lw=0.5, ls=':', alpha=0.5)
+
+        ax_f.set(xlabel='Частота, Гц', ylabel='Амплитуда, А',
+                 title=f'Спектр: {title}')
+        ax_f.set_xlim(0, f_max)
+        ax_f.legend(fontsize=7, loc='upper right')
+
+    plt.tight_layout(rect=[0, 0, 1, 0.95])
+    _save_and_close(fig, save_path)
+    return fig
+
+
 def _save_and_close(fig, save_path: Optional[str]):
     """Сохраняет данные в файл."""
 

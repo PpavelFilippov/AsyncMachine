@@ -34,14 +34,21 @@ class MachineParameters:
     Lm: float = 0.017911
 
 
-    J: float = 2.875                                           
+    J: float = 2.875
 
-              
-    Kmm: float = 2.89                                            
-    Kmp: float = 1.22                                        
-    Kip: float = 6.02                                     
 
-                         
+    Kmm: float = 2.89
+    Kmp: float = 1.22
+    Kip: float = 6.02
+
+    R1A: float | None = None
+    R1B: float | None = None
+    R1C: float | None = None
+    R2a: float | None = None
+    R2b: float | None = None
+    R2c: float | None = None
+
+
     Unom_phase: float = field(init=False)
     omega_n: float = field(init=False)
 
@@ -50,6 +57,19 @@ class MachineParameters:
 
         self.Unom_phase = self.Unom_line / np.sqrt(3)
         self.omega_n = 2 * np.pi * self.fn
+
+        if self.R1A is None:
+            self.R1A = self.R1
+        if self.R1B is None:
+            self.R1B = self.R1
+        if self.R1C is None:
+            self.R1C = self.R1
+        if self.R2a is None:
+            self.R2a = self.R2
+        if self.R2b is None:
+            self.R2b = self.R2
+        if self.R2c is None:
+            self.R2c = self.R2
 
     @property
     def omega_sync(self) -> float:

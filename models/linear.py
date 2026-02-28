@@ -29,6 +29,12 @@ class LinearInductionMachine(MachineModel):
 
         self.R1 = params.R1
         self.R2 = params.R2
+        self.R1A = params.R1A
+        self.R1B = params.R1B
+        self.R1C = params.R1C
+        self.R2a = params.R2a
+        self.R2b = params.R2b
+        self.R2c = params.R2c
         self.L1s = params.L1sigma
         self.L2s = params.L2sigma
         self.Lm = params.Lm
@@ -132,12 +138,12 @@ class LinearInductionMachine(MachineModel):
         E_rot = self._rotor_emf(i2a, i2b, i2c, imA, imB, imC, omega_r)
 
         b0 = np.array([
-            -self.R1 * i1A,
-            -self.R1 * i1B,
-            -self.R1 * i1C,
-            -self.R2 * i2a - E_rot[0],
-            -self.R2 * i2b - E_rot[1],
-            -self.R2 * i2c - E_rot[2],
+            -self.R1A * i1A,
+            -self.R1B * i1B,
+            -self.R1C * i1C,
+            -self.R2a * i2a - E_rot[0],
+            -self.R2b * i2b - E_rot[1],
+            -self.R2c * i2c - E_rot[2],
         ])
         return self._L_matrix, b0
 
